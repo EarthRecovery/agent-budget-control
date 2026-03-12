@@ -91,10 +91,37 @@ custom_envs:
       max_steps: 100
       render_mode: "rgb_array"
 
-  # Alfworld:
-  #   env_type: alfworld
-  #   env_instruction: "You are solving the Alfworld puzzle. "
-  #   env_config: null
+  Alfworld:
+    env_type: alfworld
+    max_actions_per_traj: 50
+    parallel_friendly: false
+    max_workers: 1
+    env_instruction: |
+      You are an expert agent in the ALFRED Embodied Environment.
+      Complete household tasks by navigating and interacting with objects.
+
+      You should first reason step-by-step about the current situation. This reasoning process MUST be enclosed within <think> </think> tags.
+      Once you've finished your reasoning, you should choose an admissible action for current step and present it within <answer>...</answer> tags.
+
+    max_tokens: 512
+    env_config:
+      eval_dataset: "eval_in_distribution"
+
+  AlfworldOOD:
+    env_type: alfworld
+    max_actions_per_traj: 50
+    parallel_friendly: false
+    max_workers: 1
+    env_instruction: |
+      You are an expert agent in the ALFRED Embodied Environment.
+      Complete household tasks by navigating and interacting with objects.
+
+      You should first reason step-by-step about the current situation. This reasoning process MUST be enclosed within <think> </think> tags.
+      Once you've finished your reasoning, you should choose an admissible action for current step and present it within <answer>...</answer> tags.
+
+    max_tokens: 512
+    env_config:
+      eval_dataset: "eval_out_of_distribution"
 
   Countdown:
     env_type: countdown
@@ -124,6 +151,16 @@ custom_envs:
     max_workers: 32
     env_config: 
       split: "test"
+      
+  DeepCoder:
+    env_type: deepcoder
+    max_actions_per_traj: 1
+    env_instruction: "You are solving a coding task. Provide a complete Python function solution only. Format: <answer>...</answer>"
+    max_tokens: 8000
+    parallel_friendly: true
+    max_workers: 32
+    env_config:
+      max_steps: 1
 
   FrozenLake:
     env_type: frozen_lake
@@ -132,7 +169,8 @@ custom_envs:
     max_tokens: 100
     parallel_friendly: false
     max_workers: 32
-    env_config: null
+    env_config:
+      success_rate: 0.8
 
   CoordFrozenLake:
     env_type: frozen_lake
@@ -147,6 +185,7 @@ custom_envs:
     max_workers: 32
     env_config:
       observation_format: "grid_coord"
+      success_rate: 0.8
 
   MetamathQA:
     env_type: metamathqa
@@ -154,6 +193,14 @@ custom_envs:
     env_instruction: "You are solving Math problems. "
     max_tokens: 100
     env_config: null
+
+  WebShopFull:
+    env_type: webshop
+    max_actions_per_traj: 15
+    env_instruction: "You are an expert autonomous agent operating in the WebShop e‑commerce environment."
+    max_tokens: 200
+    env_config: 
+      dataset: full # choose from small or full
 
   WebShop:
     env_type: webshop
@@ -257,6 +304,48 @@ custom_envs:
       show_valid_numbers: true
       max_steps: 81
 
+  # --- Search QA (HotpotQA) ---
+  # Requires: retrieval server running (see scripts/retrieval/launch_server.sh)
+  SearchQA:
+    env_type: search
+    max_actions_per_traj: 10
+    env_instruction: |
+      You are a search agent answering questions by searching for information.
+      Use search[your query] to find relevant documents, and finish[your answer] to submit your final answer.
+
+      You should first reason step-by-step about the current situation. This reasoning process MUST be enclosed within <think> </think> tags.
+      Then provide your action within <answer>...</answer> tags.
+
+      Examples:
+        <think>I need to find information about Ben Platt's father.</think><answer>search[Ben Platt father parent]</answer>
+        <think>Based on the search results, Ben Platt's father is Henry Platt.</think><answer>finish[Henry Platt]</answer>
+    max_tokens: 300
+    parallel_friendly: true
+    max_workers: 32
+    env_config:
+      max_steps: 10
+      max_search_results: 5
+
+  SearchQAMock:
+    env_type: search
+    max_actions_per_traj: 10
+    env_instruction: |
+      You are a search agent answering questions by searching for information.
+      Use search[your query] to find relevant documents, and finish[your answer] to submit your final answer.
+
+      You should first reason step-by-step about the current situation. This reasoning process MUST be enclosed within <think> </think> tags.
+      Then provide your action within <answer>...</answer> tags.
+
+      Examples:
+        <think>I need to find information about Ben Platt's father.</think><answer>search[Ben Platt father parent]</answer>
+        <think>Based on the search results, Ben Platt's father is Henry Platt.</think><answer>finish[Henry Platt]</answer>
+    max_tokens: 300
+    parallel_friendly: true
+    max_workers: 32
+    env_config:
+      max_steps: 10
+      max_search_results: 5
+      mock_mode: true
   game_2048:
     env_type: game_2048
     max_actions_per_traj: 700
