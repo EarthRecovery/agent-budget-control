@@ -124,6 +124,11 @@ python train.py --config-name _2_sokoban \
   actor_rollout_ref.rollout.rollout_filter_value=0.9
 ```
 
+**Evaluate:**
+```bash
+python -m ragen.llm_agent.agent_proxy --config-name _2_sokoban
+```
+
 SNR-Adaptive Filtering consistently improves training across algorithms, model scales, and modalities (green = gain from filtering):
 
 <p align="center"><img src="public/main_results.png" width="800px" alt="Main results: filtering vs no filtering" /></p>

@@ -14,6 +14,9 @@ from .config import DeepCoderEnvConfig
 from .utils import prepare_deepcoder_data, run_deepcoder_sandbox
 
 
+_DATASET_CACHE: Dict[Tuple[Optional[str], Optional[str]], Any] = {}
+
+
 class DeepCoderEnv(BaseLanguageBasedEnv):
     def __init__(self, config: Optional[DeepCoderEnvConfig] = None):
         super(DeepCoderEnv, self).__init__()
@@ -32,8 +35,15 @@ class DeepCoderEnv(BaseLanguageBasedEnv):
 
     def _load_data(self) -> None:
         dataset_path = self.config.dataset_path
+        cache_key = (dataset_path, self.config.cache_dir)
+        cached_dataset = _DATASET_CACHE.get(cache_key)
+        if cached_dataset is not None:
+            self.dataset = cached_dataset
+            return
+
         if dataset_path:
             self.dataset = load_dataset(path=dataset_path, cache_dir=self.config.cache_dir)
+            _DATASET_CACHE[cache_key] = self.dataset
             return
 
         dataset_bundle = None
@@ -45,6 +55,7 @@ class DeepCoderEnv(BaseLanguageBasedEnv):
 
         if dataset_bundle is not None:
             self.dataset = dataset_bundle
+            _DATASET_CACHE[cache_key] = self.dataset
         else:
             self.dataset = None
 
