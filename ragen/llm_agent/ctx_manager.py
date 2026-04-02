@@ -94,7 +94,20 @@ class ContextManager:
         self.tokenizer = tokenizer
         self.processor = processor
         self.action_sep = self.config.agent_proxy.action_sep
-        self.special_token_list = ["<think>", "</think>", "<answer>", "</answer>", "<|im_start|>", "<|im_end|>"]
+        self.special_token_list = [
+            "<budget-thinking>",
+            "</budget-thinking>",
+            "<think>",
+            "</think>",
+            "<answer>",
+            "</answer>",
+            "<token_estimation>",
+            "</token_estimation>",
+            "<turn_estimation>",
+            "</turn_estimation>",
+            "<|im_start|>",
+            "<|im_end|>",
+        ]
 
         self.es_cfg = self.config.es_manager[mode]
         self.env_nums = {
@@ -106,6 +119,46 @@ class ContextManager:
 
         # Initialize memory managers per environment type
         self._memory_managers: Dict[str, BaseMemory] = {}
+
+    def _agent_proxy_get(self, key: str, default: Any = None) -> Any:
+        agent_cfg = getattr(self.config, "agent_proxy", None)
+        if agent_cfg is None:
+            return default
+        if hasattr(agent_cfg, "get"):
+            value = agent_cfg.get(key, None)
+            if value is None:
+                value = agent_cfg.get(key.replace("-", "_"), None)
+            return default if value is None else value
+        return getattr(agent_cfg, key.replace("-", "_"), default)
+
+    def _get_eval_estimation_mode(self) -> Optional[str]:
+        single_enabled = bool(self._agent_proxy_get("eval-estimation-single", False))
+        multi_enabled = bool(self._agent_proxy_get("eval-estimation-multi", False))
+        if single_enabled and multi_enabled:
+            raise ValueError(
+                "agent_proxy.eval-estimation-single and "
+                "agent_proxy.eval-estimation-multi cannot both be True."
+            )
+        if multi_enabled:
+            return "multi"
+        if single_enabled:
+            return "single"
+        return None
+
+    def _get_generation_prefix(self) -> str:
+        eval_estimation_mode = self._get_eval_estimation_mode()
+        if eval_estimation_mode in {"single", "multi"}:
+            return "<budget-thinking>"
+        if bool(getattr(self.config.agent_proxy, "token_estimation", False)):
+            return "<token_estimation>"
+        return "<budget-thinking>"
+
+    def _ensure_generation_prefix(self, response: str) -> str:
+        text = str(response)
+        prefix = self._get_generation_prefix()
+        if text.lstrip().startswith(prefix):
+            return text
+        return prefix + text
 
     def _check_env_installed(self, env_type: str):
         if env_type not in REGISTERED_ENV_CONFIGS:
@@ -143,6 +196,7 @@ class ContextManager:
             prefixes[env_tag] = env_instruction
             env_config_lookup[env_tag] = {
                 'max_tokens': env_config.get("max_tokens", self.config.actor_rollout_ref.rollout.response_length),
+                'env_tag': env_tag,
                 'env_type': env_config.env_type,
             }
 
@@ -372,6 +426,7 @@ class ContextManager:
         env_ids: List[int],
         group_ids: List[int],
         messages_list: List[List[Dict]],
+        budget_turns: Optional[List[Optional[int]]] = None,
         episode_ids: Optional[List[int]] = None,
         uid_list: Optional[List[Any]] = None,
     ) -> DataProto:
@@ -392,6 +447,8 @@ class ContextManager:
             "group_ids": np.array(group_ids, dtype=int),
             "messages_list": np.array(messages_list, dtype=object),
         }
+        if budget_turns is not None:
+            non_tensor["budget_turns"] = np.array(budget_turns, dtype=object)
         if episode_ids is not None:
             non_tensor["episode_ids"] = np.array(episode_ids, dtype=int)
         if uid_list is not None:
@@ -468,15 +525,20 @@ class ContextManager:
         Returns:
             Truncated message list
         """
-        max_length = getattr(self.config.actor_rollout_ref.rollout, "max_model_len", None)
-        if max_length is None:
+        max_model_len = getattr(self.config.actor_rollout_ref.rollout, "max_model_len", None)
+        if max_model_len is None:
             return messages
+        response_length = int(getattr(self.config.actor_rollout_ref.rollout, "response_length", 0) or 0)
+        model_cfg = getattr(self.config, "model_config", None)
+        prompt_token_margin = int(getattr(model_cfg, "prompt_token_margin", 0) or 0)
+        max_length = max(1, int(max_model_len) - response_length - prompt_token_margin)
 
         # Calculate current length
         full_text = self.tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=add_generation_prompt,
-            tokenize=False
+            tokenize=False,
+            **self._get_chat_template_kwargs(),
         )
         token_len = len(self.tokenizer(full_text, add_special_tokens=False)["input_ids"])
 
@@ -513,14 +575,16 @@ class ContextManager:
             full_text = self.tokenizer.apply_chat_template(
                 truncated,
                 add_generation_prompt=add_generation_prompt,
-                tokenize=False
+                tokenize=False,
+                **self._get_chat_template_kwargs(),
             )
             token_len = len(self.tokenizer(full_text, add_special_tokens=False)["input_ids"])
 
         if token_len > max_length:
             logging.warning(
-                f"Cannot truncate to {max_length} tokens (current: {token_len}). "
-                "Single turn may exceed max length."
+                f"Cannot truncate prompt to {max_length} tokens (current: {token_len}). "
+                f"Configured total context budget={int(max_model_len)}, response_length={response_length}, "
+                f"prompt_token_margin={prompt_token_margin}. Single turn may exceed max length."
             )
 
         return [system_msg] + conversation
@@ -529,12 +593,37 @@ class ContextManager:
 
     def _build_format_prompt(self, env_id: int) -> Tuple[str, str]:
         """Build FORMAT_PROMPT and LENGTH_PROMPT for an environment."""
-        FORMAT_PROMPT = (
+        answer_format = (
             "<think> [Your thoughts] </think> <answer> [your answer] </answer>"
             if self.config.agent_proxy.enable_think
             else "<answer> [your answer] </answer>"
         )
-        LENGTH_PROMPT = f"Max response length: {self.env_config_lookup[env_id]['max_tokens']} words (tokens)."
+        eval_estimation_mode = self._get_eval_estimation_mode()
+        if eval_estimation_mode == "single":
+            FORMAT_PROMPT = (
+                "<budget-thinking> [Your budget-related reasoning] </budget-thinking> "
+                "<token_estimation> [Your estimated token count] </token_estimation> "
+                f"{answer_format}"
+            )
+        elif eval_estimation_mode == "multi":
+            FORMAT_PROMPT = (
+                "<budget-thinking> [Your budget-related reasoning] </budget-thinking> "
+                "<turn_estimation> [Your estimated remaining turn count] </turn_estimation> "
+                "<token_estimation> [Your estimated token count] </token_estimation> "
+                f"{answer_format}"
+            )
+        else:
+            FORMAT_PROMPT = (
+                "<budget-thinking> [Your budget-related reasoning] </budget-thinking> "
+                f"{answer_format}"
+            )
+        env_meta = self.env_config_lookup[env_id]
+        if env_meta.get("env_tag") == "DeepCoder" or env_meta.get("env_type") == "deepcoder":
+            FORMAT_PROMPT += (
+                " Inside <answer>, output raw Python code only. "
+                "Do not use Markdown code fences, triple backticks, backticks, or any explanation."
+            )
+        LENGTH_PROMPT = f"Max response length: {env_meta['max_tokens']} words (tokens)."
         return FORMAT_PROMPT, LENGTH_PROMPT
 
     def _build_system_content(self, env_id: int) -> str:
@@ -545,6 +634,12 @@ class ContextManager:
 
     def _count_tokens(self, text: str) -> int:
         return len(self.tokenizer(text, add_special_tokens=False)["input_ids"])
+
+    def _get_chat_template_kwargs(self) -> Dict:
+        qwen_enable_thinking = getattr(self.config.agent_proxy, "qwen_enable_thinking", None)
+        if qwen_enable_thinking is None:
+            return {}
+        return {"enable_thinking": bool(qwen_enable_thinking)}
 
     def _build_single_turn_messages(
         self,
@@ -874,12 +969,7 @@ class ContextManager:
         env_id = env_output["env_id"]
 
         # Get format prompts
-        FORMAT_PROMPT = (
-            "<think> [Your thoughts] </think> <answer> [your answer] </answer>"
-            if self.config.agent_proxy.enable_think
-            else "<answer> [your answer] </answer>"
-        )
-        LENGTH_PROMPT = f"Max response length: {self.env_config_lookup[env_id]['max_tokens']} words (tokens)."
+        FORMAT_PROMPT, LENGTH_PROMPT = self._build_format_prompt(env_id)
 
         # Use memory manager to build content
         memory_manager = self._get_memory_manager(env_id)
@@ -961,7 +1051,12 @@ class ContextManager:
                     include_assistant=True,
                 )
 
-                text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
+                text = self.tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=False,
+                    tokenize=False,
+                    **self._get_chat_template_kwargs(),
+                )
 
                 llm_input_texts.append(text)
                 messages_list.append(messages)
@@ -1062,7 +1157,12 @@ class ContextManager:
                 # Apply max length truncation
                 messages = self._apply_max_length(messages, add_generation_prompt=False)
 
-                text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
+                text = self.tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=False,
+                    tokenize=False,
+                    **self._get_chat_template_kwargs(),
+                )
 
                 llm_input_texts.append(text)
                 messages_list.append(messages)
@@ -1160,7 +1260,12 @@ class ContextManager:
             # Apply max length truncation
             messages = self._apply_max_length(messages, add_generation_prompt=False)
 
-            text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
+            text = self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=False,
+                tokenize=False,
+                **self._get_chat_template_kwargs(),
+            )
             llm_input_texts.append(text)
             messages_list.append(messages)
 
@@ -1253,13 +1358,15 @@ class ContextManager:
             # Apply max length truncation
             messages = self._apply_max_length(messages, add_generation_prompt=True)
 
-            text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            text = self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=False,
+                **self._get_chat_template_kwargs(),
+            )
 
             # Add generation prompt prefix
-            if self.config.agent_proxy.enable_think:
-                text = text + "<think>"
-            else:
-                text = text + "<answer>"
+            text = text + self._get_generation_prefix()
 
             llm_input_texts.append(text)
             messages_list.append(messages)
@@ -1279,6 +1386,10 @@ class ContextManager:
             "env_ids": np.array([env_output["env_id"] for env_output in env_outputs], dtype=int),
             "group_ids": np.array([env_output["group_id"] for env_output in env_outputs], dtype=int),
             "messages_list": np.array(messages_list, dtype=object),
+            "budget_turns": np.array(
+                [env_output.get("budget_turn") for env_output in env_outputs],
+                dtype=object,
+            ),
         }
 
         return llm_inputs
@@ -1386,17 +1497,44 @@ class ContextManager:
             )
         else: # dataproto has textual responses
             responses = lm_outputs.non_tensor_batch['response_texts']
-        responses = ["<think>" + response if self.config.agent_proxy.enable_think else "<answer>" + response for response in responses] # The LLM generation does not include <think> tags. Add them back here.
+        raw_responses = list(responses)
+        response_errors = lm_outputs.non_tensor_batch.get("response_errors")
+        if response_errors is None:
+            response_errors = [None] * len(raw_responses)
+        elif hasattr(response_errors, "tolist"):
+            response_errors = response_errors.tolist()
+        else:
+            response_errors = list(response_errors)
+        responses = [
+            self._ensure_generation_prefix(response) if response_errors[idx] is None else ""
+            for idx, response in enumerate(responses)
+        ]
             
         env_ids = lm_outputs.non_tensor_batch['env_ids']
         env_inputs = []
-        for env_id, response in zip(env_ids, responses):
-            llm_response, actions = self._parse_response(response)
+        for idx, (env_id, response, raw_response) in enumerate(zip(env_ids, responses, raw_responses)):
+            response_error = response_errors[idx] if idx < len(response_errors) else None
+            if response_error is None:
+                llm_response, actions = self._parse_response(response)
+            else:
+                llm_response, actions = "", []
+            try:
+                token_count = len(self.tokenizer.encode(raw_response, add_special_tokens=False))
+            except Exception:
+                token_count = len(str(raw_response).split())
+            if response_error is not None:
+                token_count = 0
             env_inputs.append({
                 "env_id": env_id,
-                "llm_raw_response": response,
+                "llm_raw_response": raw_response,
                 "llm_response": llm_response,
                 "actions": actions,
+                "response_tokens": token_count,
+                "llm_error": None if response_error is None else response_error.get("error"),
+                "llm_error_type": None if response_error is None else response_error.get("error_type"),
+                "llm_error_code": None if response_error is None else response_error.get("error_code"),
+                "llm_error_status_code": None if response_error is None else response_error.get("status_code"),
+                "llm_error_retryable": None if response_error is None else response_error.get("retryable"),
             })
         return env_inputs
 

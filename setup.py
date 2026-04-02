@@ -1,6 +1,17 @@
-from setuptools import setup, find_packages
 import os
-import sys
+from setuptools import find_packages, setup
+
+
+def _read_requirements(relative_path):
+    requirements_path = os.path.join(os.path.dirname(__file__), relative_path)
+    if not os.path.exists(requirements_path):
+        return []
+    with open(requirements_path) as requirements_file:
+        return [
+            line.strip()
+            for line in requirements_file
+            if line.strip() and not line.startswith("#")
+        ]
 
 # Base dependencies required for all installations
 base_requires = [
@@ -60,6 +71,9 @@ search_requires = [
     "requests",
 ]
 
+# Optional dependencies for Robotouille environment
+robotouille_requires = _read_requirements("external/robotouille/requirements.txt")
+
 setup(
     name='ragen',
     version='0.1',
@@ -74,7 +88,8 @@ setup(
         "webshop": webshop_requires,
         "lean": lean_requires,
         "search": search_requires,
-        "all": webshop_requires + lean_requires + search_requires,
+        "robotouille": robotouille_requires,
+        "all": webshop_requires + lean_requires + search_requires + robotouille_requires,
     },
     package_data={'ragen': ['*/*.md']},
     classifiers=[

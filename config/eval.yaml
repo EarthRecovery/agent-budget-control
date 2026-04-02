@@ -32,15 +32,21 @@ actor_rollout_ref:
     log_prob_micro_batch_size_per_gpu: 64
     tensor_model_parallel_size: 1
     dtype: bfloat16
+    enable_sleep_mode: True
     max_model_len: 3600
     prompt_length: 1
     response_length: 400
     gpu_memory_utilization: 0.9
     max_num_batched_tokens: 8192
     enforce_eager: True
+    disable_custom_all_reduce: True
+    disable_mm_preprocessor_cache: True
+    skip_tokenizer_init: False
     free_cache_engine: True
     enable_chunked_prefill: False
+    enable_prefix_caching: True
     disable_log_stats: False
+    trust_remote_code: True
     val_kwargs:
       do_sample: True
       temperature: 0.5
@@ -56,6 +62,14 @@ agent_proxy:
   max_actions_per_turn: 2
   use_turn_scores: False
   enable_think: True
+  qwen_enable_thinking: null
+  "eval-estimation-single": False
+  "eval-estimation-multi": False
+  test_generate: False
+  test_string_output: "<answer></answer>"
+  lm_inputs_record_path: null
+  es_outputs_record_path: null
+  test_rewards: null
   reward_normalization:
     grouping: "state"
     method: "identity"
@@ -65,12 +79,14 @@ es_manager:
   train:
     env_groups: 8
     group_size: 16
+    start_group_index: 0
     env_configs:
       tags: ["CoordSokoban"]
       n_groups: [8]
   val:
     env_groups: 32
     group_size: 16
+    start_group_index: 0
     env_configs:
       tags: ["CoordSokoban"]
       n_groups: [32]

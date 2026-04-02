@@ -11,3 +11,6 @@
 [submodule "ragen/env/spatial/Base"]
 	path = ragen/env/spatial/Base
 	url = https://github.com/williamzhangNU/ToS_Base
+[submodule "external/robotouille"]
+	path = external/robotouille
+	url = https://github.com/EarthRecovery/robotouille.git

@@ -14,6 +14,7 @@ import numpy as np
 import logging
 
 from ragen.env import REGISTERED_ENVS, REGISTERED_ENV_CONFIGS
+from ragen.wrapper.es_manager_wrapper import EsManagerWrapper
 from ragen.utils import register_resolvers
 register_resolvers()
 
@@ -37,8 +38,12 @@ class EnvStateManager:
         self.sys_config = config
         self.mode = mode
         self.config = getattr(self.sys_config.es_manager, mode)
+        self.debug_reward_flow = bool(getattr(self.sys_config.agent_proxy, "debug_reward_flow", False))
         self.env_groups = int(self.config.env_groups)
         self.group_size = self.config.group_size
+        self.start_group_index = int(getattr(self.config, "start_group_index", 0) or 0)
+        if self.start_group_index < 0:
+            raise ValueError(f"start_group_index must be >= 0, got {self.start_group_index}")
         seed_cfg = getattr(self.sys_config, "seed", None)
         if seed_cfg is not None:
             self.base_seed = seed_cfg.get(mode, None)
@@ -46,11 +51,17 @@ class EnvStateManager:
             self.base_seed = None
         self.seed_counter = 0
         self._init_envs()
+        self.es_wrapper = EsManagerWrapper(config)
+        self._turn_idx = 0
         self.rollout_cache = None
         self._executors: Dict[str, ThreadPoolExecutor] = {}
         self._executors_shutdown = False
         self._register_parallel_executors()
         atexit.register(self._shutdown_executors)
+
+    def _debug_reward(self, message: str) -> None:
+        if self.debug_reward_flow:
+            print(f"[reward-debug][es_manager][{self.mode}][turn={self._turn_idx}] {message}")
 
     def _init_envs(self):
         """Initialize the environments. train_envs and val_envs are lists of envs:
@@ -74,19 +85,59 @@ class EnvStateManager:
                 cfg_template = self.sys_config.custom_envs[tag]
                 env_class = cfg_template.env_type
                 max_actions_per_traj = cfg_template.max_actions_per_traj
+                raw_env_cfg = cfg_template.env_config or {}
                 if cfg_template.env_config is None:
                     env_config = REGISTERED_ENV_CONFIGS[env_class]()
                 else:
                     env_config = REGISTERED_ENV_CONFIGS[env_class](**cfg_template.env_config)
+                if raw_env_cfg.get("action_lookup") is None and "action_lookup" in raw_env_cfg:
+                    env_config.action_lookup = None
                 env_obj = REGISTERED_ENVS[env_class](env_config)
+                budget_turn = self._init_budget_turn()
+                budget_token = self._init_budget_token()
                 parallel_friendly = bool(getattr(cfg_template, "parallel_friendly", False))
                 max_workers = int(getattr(cfg_template, "max_workers", 1) or 1)
                 entry = {'tag': tag, 'group_id': env_id // self.group_size, 'env_id': env_id, 
                         'env': env_obj, 'config': env_config, 'status': EnvStatus(), 'max_actions_per_traj': max_actions_per_traj,
-                        'parallel_friendly': parallel_friendly, 'max_workers': max_workers}
+                        'parallel_friendly': parallel_friendly, 'max_workers': max_workers, 'budget_turn': budget_turn,
+                        'budget_token': budget_token}
                 env_list.append(entry)
             done_groups += n_group
         return env_list
+
+    def _init_budget_turn(self) -> Optional[int]:
+        budget_cfg = getattr(self.sys_config.agent_proxy, "mixed_turn_budget", None)
+        if budget_cfg is None or not getattr(budget_cfg, "enabled", False):
+            return None
+        if not getattr(budget_cfg, "mixed_budget", False):
+            return None
+        raw_range = getattr(budget_cfg, "mixed_budget_range", None)
+        if raw_range is None:
+            max_turn = int(getattr(self.sys_config.agent_proxy, "max_turn", 0) or 0)
+            low, high = 0, max_turn
+        else:
+            low, high = int(raw_range[0]), int(raw_range[1])
+            if low > high:
+                low, high = high, low
+        return random.randint(low, high)
+
+    def _init_budget_token(self) -> Optional[int]:
+        budget_cfg = getattr(self.sys_config.agent_proxy, "mixed_token_budget", None)
+        if budget_cfg is None or not getattr(budget_cfg, "enabled", False):
+            return None
+        if not getattr(budget_cfg, "mixed_budget", False):
+            return None
+        raw_range = getattr(budget_cfg, "mixed_budget_range", None)
+        if raw_range is None:
+            rollout_cfg = getattr(self.sys_config, "actor_rollout_ref", None)
+            rollout = getattr(rollout_cfg, "rollout", None) if rollout_cfg is not None else None
+            max_tokens = int(getattr(rollout, "response_length", 0) or 0)
+            low, high = 0, max_tokens
+        else:
+            low, high = int(raw_range[0]), int(raw_range[1])
+            if low > high:
+                low, high = high, low
+        return random.randint(low, high)
 
     def _register_parallel_executors(self):
         tag_seen: Dict[str, dict] = {}
@@ -117,21 +168,34 @@ class EnvStateManager:
             return sum(seeds, [])
 
         envs = self.envs
-        rollout_cache = [{"env_id": entry['env_id'], "history": [], "group_id": entry['group_id'], "tag": entry['tag'], "penalty": 0} for entry in envs]
+        rollout_cache = [
+            {
+                "env_id": entry['env_id'],
+                "history": [],
+                "group_id": entry['group_id'],
+                "tag": entry['tag'],
+                "penalty": 0,
+                "budget_turn": entry.get("budget_turn"),
+                "budget_token": entry.get("budget_token"),
+                "turn_done": False,
+            }
+            for entry in envs
+        ]
 
         # reset all environments
         if seed is None:
             if self.mode == "train":
                 if self.base_seed is not None:
-                    seed = self.base_seed + self.seed_counter
+                    seed = self.base_seed + self.start_group_index + self.seed_counter
                     self.seed_counter += self.env_groups
                 else:
                     seed = random.randint(0, 1000000)
             else:
-                seed = 123 if self.base_seed is None else self.base_seed
+                base_seed = 123 if self.base_seed is None else self.base_seed
+                seed = base_seed + self.start_group_index
         else:
             if self.mode == "train" and self.base_seed is not None:
-                self.seed_counter = seed - self.base_seed + 1
+                self.seed_counter = seed - (self.base_seed + self.start_group_index) + 1
         seeds = _expand_seed(seed)
 
         def _reset_single(entry, single_seed):
@@ -167,6 +231,15 @@ class EnvStateManager:
             cache['history'] = self._update_cache_history(cache['history'], next_state=next_state, actions_left=env['max_actions_per_traj'], num_actions_info=None)
             
         self.rollout_cache = rollout_cache
+        self._turn_idx = 0
+        self.es_wrapper.set_state(
+            turn_idx=self._turn_idx,
+            mode=self.mode,
+            n_inputs=len(rollout_cache),
+            is_reset=True,
+        )
+        rollout_cache = self.es_wrapper.intercept(rollout_cache)
+        self._turn_idx = 1
         return rollout_cache
 
     def step(self, all_env_inputs: List[Dict]):
@@ -182,24 +255,18 @@ class EnvStateManager:
         """
         def _execute_actions(env, actions):
             acc_reward, turn_info, turn_done = 0, {}, False
-            raw_acc_reward = 0.0
             executed_actions = []
             for action in actions:
                 _, reward, done, info = env.step(action)
+                self._debug_reward(
+                    f"env.step action={action!r}, reward={float(reward):.4f}, done={bool(done)}, success={info.get('success', None)}"
+                )
                 acc_reward += reward
-                try:
-                    raw_acc_reward += float(info.get('raw_reward', 0.0))
-                except Exception:
-                    pass
                 turn_info.update(info) # NOTE: currently use last info for multi-action
                 executed_actions.append(action)
                 if done:
                     turn_done = True
                     break
-            try:
-                turn_info['raw_reward'] = float(raw_acc_reward)
-            except Exception:
-                pass
             return acc_reward, turn_info, turn_done, executed_actions
 
         def _log_env_state(status, history, cur_obs, max_actions_per_traj, executed_actions, all_actions, acc_reward, turn_done, turn_info, env_input):
@@ -212,14 +279,27 @@ class EnvStateManager:
                 status.truncated = not turn_info.get('success', False)
             history = self._update_cache_history(history, next_state=obs, actions_left=actions_left, num_actions_info={
                 'actions': executed_actions, 'reward': acc_reward, 'info': turn_info,
-                'llm_response': env_input['llm_response'], 'llm_raw_response': env_input['llm_raw_response']
+                'llm_response': env_input['llm_response'], 'llm_raw_response': env_input['llm_raw_response'],
+                'token_count': env_input.get('response_tokens', 0),
+                'llm_error': env_input.get('llm_error'),
+                'llm_error_type': env_input.get('llm_error_type'),
+                'llm_error_code': env_input.get('llm_error_code'),
+                'llm_error_status_code': env_input.get('llm_error_status_code'),
+                'llm_error_retryable': env_input.get('llm_error_retryable'),
             })
+            self._debug_reward(
+                f"history_update env_id={env_input['env_id']}, executed_actions={executed_actions}, "
+                f"acc_reward={float(acc_reward):.4f}, turn_done={turn_done}, success={turn_info.get('success', None)}, "
+                f"token_count={env_input.get('response_tokens', 0)}"
+            )
             # filter out invalid actions
             # history = [content for content in history[:-1] if content['actions']] + [history[-1]]
             return status, history
 
         envs = self.envs
         env_outputs = []
+        wrapper_inputs = []
+        active_env_ids = []
 
         def _process_env_input(env_input: Dict) -> Dict:
             acc_reward, turn_info, turn_done = 0, {}, False
@@ -245,6 +325,11 @@ class EnvStateManager:
                 status.truncated = True
                 status.terminated = True
                 turn_done = True
+            self._debug_reward(
+                f"post_process env_id={env_id}, input_actions={env_input['actions']}, valid_actions={valid_actions}, "
+                f"no_manager_action={no_manager_action}, penalty_delta={penalty_delta}, turn_done={turn_done}, "
+                f"status_terminated={status.terminated}, status_truncated={status.truncated}"
+            )
 
             return {
                 'env_id': env_id,
@@ -281,9 +366,35 @@ class EnvStateManager:
             if result['penalty_delta']:
                 self.rollout_cache[env_id]["penalty"] += result['penalty_delta']
             self.rollout_cache[env_id]['history'] = result['history']
+            self.rollout_cache[env_id]['turn_done'] = bool(result['turn_done'])
             entry['status'] = result['status']
+            last_turn = result['history'][-2] if len(result['history']) >= 2 else {}
+            self._debug_reward(
+                f"cache_commit env_id={env_id}, turn_done={result['turn_done']}, "
+                f"last_reward={float(last_turn.get('reward', 0.0)):.4f}, "
+                f"last_success={last_turn.get('info', {}).get('success', None)}"
+            )
+            wrapper_inputs.append(self.rollout_cache[env_id])
             if not result['turn_done']:
-                env_outputs.append(self.rollout_cache[env_id])
+                active_env_ids.append(env_id)
+            else:
+                self._debug_reward(f"filtered_from_env_outputs env_id={env_id} because turn_done=True")
+
+        self.es_wrapper.set_state(
+            turn_idx=self._turn_idx,
+            mode=self.mode,
+            n_inputs=len(all_env_inputs),
+        )
+        self._debug_reward(
+            f"before_wrapper active_env_outputs={len(active_env_ids)}, wrapper_inputs={len(wrapper_inputs)}"
+        )
+        wrapped_outputs = self.es_wrapper.intercept(wrapper_inputs)
+        wrapped_by_env_id = {output["env_id"]: output for output in wrapped_outputs}
+        for env_id, wrapped in wrapped_by_env_id.items():
+            self.rollout_cache[env_id] = wrapped
+        env_outputs = [wrapped_by_env_id[env_id] for env_id in active_env_ids if env_id in wrapped_by_env_id]
+        self._debug_reward(f"after_wrapper active_env_outputs={len(env_outputs)}")
+        self._turn_idx += 1
 
         return env_outputs
 
@@ -300,6 +411,23 @@ class EnvStateManager:
                 'success': float(status.terminated and (not status.truncated)),
                 'num_actions': status.num_actions,
             }
+            estimation_turns = [
+                turn for turn in cache.get('history', [])
+                if 'estimate_success' in turn
+            ]
+            if estimation_turns:
+                success_flags = [1.0 if bool(turn.get('estimate_success', False)) else 0.0 for turn in estimation_turns]
+                missing_flags = [1.0 if (not bool(turn.get('estimate_success', False))) else 0.0 for turn in estimation_turns]
+                abs_token_errors = [
+                    float(abs(turn.get('estimate_token_diff', 0.0)))
+                    for turn in estimation_turns
+                    if turn.get('estimate_success', False) and turn.get('estimate_token_diff') is not None
+                ]
+                env_metric['token_estimation_success_rate'] = float(np.mean(success_flags))
+                env_metric['token_estimation_missing_tag_rate'] = float(np.mean(missing_flags))
+                mean_abs_error = float(np.mean(abs_token_errors)) if abs_token_errors else 0.0
+                env_metric['token_estimation_mean_abs_error'] = mean_abs_error
+                env_metric['token_estimation_mean_abs_error_ratio'] = mean_abs_error
 
             try:
                 import numpy as _np
@@ -339,6 +467,22 @@ class EnvStateManager:
                     env_metric['final_score'] = float(custom_metric['score'][-1])
             except Exception:
                 pass
+
+            if "reward_sum" in cache:
+                env_metric["reward_sum"] = float(cache["reward_sum"])
+            if "origin_reward_sum" in cache:
+                env_metric["origin_reward_sum"] = float(cache["origin_reward_sum"])
+            benchmark_factors = cache.get("benchmark_factors", {})
+            for key, value in benchmark_factors.items():
+                if isinstance(value, (int, float, bool, np.number)):
+                    env_metric[f"benchmark/{key}"] = float(value)
+            if self.debug_reward_flow:
+                tracked_rewards = [float(turn.get("reward", 0.0)) for turn in cache.get("history", []) if "reward" in turn]
+                tracked_success = [turn.get("info", {}).get("success", None) for turn in cache.get("history", []) if "reward" in turn]
+                self._debug_reward(
+                    f"rollout_state env_id={entry['env_id']}, rewards={tracked_rewards}, success_flags={tracked_success}, "
+                    f"metric_success={env_metric.get('success', None)}"
+                )
 
             cache['history'][-1]['metrics'] = custom_metric
             env_metric = {f"{entry['tag']}/{k}": v for k, v in env_metric.items()}
@@ -386,6 +530,8 @@ class EnvStateManager:
         mapped_actions = []
         action_lookup = getattr(entry['env'].config, 'action_lookup', None)
         if action_lookup is None:
+            mapped_actions = actions
+        elif action_lookup == {}:
             mapped_actions = actions
         else: # the envs have pre-defined action lookup
             rev_action_lookup = {v.lower(): k for k, v in action_lookup.items()}

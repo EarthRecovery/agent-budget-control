@@ -16,6 +16,8 @@ from .deepcoder.config import DeepCoderEnvConfig
 from .deepcoder.env import DeepCoderEnv
 from .game_2048.config import Game2048EnvConfig
 from .game_2048.env import Game2048Env
+from .gpqa_main.config import GPQAMainEnvConfig
+from .gpqa_main.env import GPQAMainEnv
 from .rubikscube.config import RubiksCube2x2Config
 from .rubikscube.env import RubiksCube2x2Env
 
@@ -28,6 +30,7 @@ REGISTERED_ENVS = {
     'metamathqa': MetaMathQAEnv,
     'lean': LeanEnv,
     'deepcoder': DeepCoderEnv,
+    'gpqa_main': GPQAMainEnv,
     'sudoku': SudokuEnv,
     'game_2048': Game2048Env,
     'rubikscube': RubiksCube2x2Env,
@@ -40,6 +43,7 @@ REGISTERED_ENV_CONFIGS = {
     'frozen_lake': FrozenLakeEnvConfig,
     'metamathqa': MetaMathQAEnvConfig,
     'deepcoder': DeepCoderEnvConfig,
+    'gpqa_main': GPQAMainEnvConfig,
     'lean': LeanEnvConfig,
     'sudoku': SudokuEnvConfig,
     'game_2048': Game2048EnvConfig,   
@@ -67,5 +71,14 @@ try:
     from .search.config import SearchEnvConfig
     REGISTERED_ENVS['search'] = SearchEnv
     REGISTERED_ENV_CONFIGS['search'] = SearchEnvConfig
+except ImportError:
+    pass
+
+try:
+    from .robotouille.config import RobotouilleEnvConfig
+    from .robotouille.env import RobotouilleEnv
+
+    REGISTERED_ENVS['robotouille'] = RobotouilleEnv
+    REGISTERED_ENV_CONFIGS['robotouille'] = RobotouilleEnvConfig
 except ImportError:
     pass

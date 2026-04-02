@@ -1,0 +1,33 @@
+defaults:
+  - base
+
+micro_batch_size_per_gpu: 1
+ppo_mini_batch_size: 32
+model_path: Qwen/Qwen2.5-7B-Instruct
+
+trainer:
+  experiment_name: robotouille
+  save_freq: 50
+
+agent_proxy:
+  max_turn: 10
+  max_actions_per_turn: 1
+  log_generations_path: null
+
+actor_rollout_ref:
+  rollout:
+    max_model_len: 10000
+    max_num_batched_tokens: 10000
+
+es_manager:
+  train:
+    env_configs:
+      tags: ["Robotouille"]
+  val:
+    env_configs:
+      tags: ["Robotouille"]
+
+custom_envs:
+  Robotouille:
+    env_config:
+      action_lookup: null

@@ -1,7 +1,7 @@
 import pytest
 from ragen.llm_agent.ctx_manager import ContextManager
 from omegaconf import OmegaConf
-from verl.verl.protocol import DataProto
+from verl.protocol import DataProto
 
 class DummyTokenizer:
     name_or_path = "qwen"  # or "llama-3" or any string your code expects
@@ -11,9 +11,10 @@ class DummyTokenizer:
 
     def __call__(self, texts, return_tensors, padding, padding_side, truncation):
         import torch
+        batch_size = len(texts) if isinstance(texts, list) else 1
         class DummyOutput:
-            input_ids = torch.tensor([[1, 2, 3]])
-            attention_mask = torch.tensor([[1, 1, 1]])
+            input_ids = torch.tensor([[1, 2, 3]] * batch_size)
+            attention_mask = torch.tensor([[1, 1, 1]] * batch_size)
         return DummyOutput()
 
     def encode(self, text):
@@ -24,10 +25,12 @@ class DummyTokenizer:
 def dummy_config():
     cfg = OmegaConf.create({
         "agent_proxy": {
+            "context_window_mode": "single_turn",
             "max_context_window": 2,
             "enable_think": False,
             "use_turn_scores": False,
             "action_sep": "|",
+            "max_actions_per_turn": 2,
             "reward_normalization": {
                 "grouping": "batch",
                 "method": "identity"
@@ -76,9 +79,109 @@ def test_context_window_truncation(dummy_config):
     }]
 
     lm_inputs: DataProto = ctx.get_lm_inputs(env_outputs, prepare_for_update=True)
-    messages = lm_inputs.non_tensor_batch["messages_list"][0]
+    messages = lm_inputs.non_tensor_batch["messages_list"][-1]
 
     # Ensure only last 2 turns are present
     assert "S1" not in str(messages)
     assert "S2" in str(messages)
     assert "S3" in str(messages)
+
+
+def test_multi_eval_estimation_generation_prefix_uses_budget_thinking(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["eval-estimation-single"] = False
+    cfg.agent_proxy["eval-estimation-multi"] = True
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+
+    assert ctx._get_generation_prefix() == "<budget-thinking>"
+
+
+def test_single_eval_estimation_generation_prefix_uses_budget_thinking(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["eval-estimation-single"] = True
+    cfg.agent_proxy["eval-estimation-multi"] = False
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+
+    assert ctx._get_generation_prefix() == "<budget-thinking>"
+
+
+def test_single_eval_estimation_format_prompt_includes_token_estimation_once(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["eval-estimation-single"] = True
+    cfg.agent_proxy["eval-estimation-multi"] = False
+    cfg.agent_proxy["enable_think"] = True
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+    ctx.env_config_lookup = {0: {"max_tokens": 128, "env_tag": "GPQAMain", "env_type": "gpqa_main"}}
+
+    format_prompt, _ = ctx._build_format_prompt(0)
+
+    assert format_prompt.count("<budget-thinking>") == 1
+    assert "<token_estimation>" in format_prompt
+
+
+def test_multi_eval_estimation_format_prompt_includes_both_estimates_once(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["eval-estimation-single"] = False
+    cfg.agent_proxy["eval-estimation-multi"] = True
+    cfg.agent_proxy["enable_think"] = True
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+    ctx.env_config_lookup = {0: {"max_tokens": 128, "env_tag": "CoordSokoban", "env_type": "sokoban"}}
+
+    format_prompt, _ = ctx._build_format_prompt(0)
+
+    assert format_prompt.count("<budget-thinking>") == 1
+    assert "<turn_estimation>" in format_prompt
+    assert "<token_estimation>" in format_prompt
+
+
+def test_openai_reasoning_eval_estimation_keeps_explicit_reasoning_tags(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["eval-estimation-single"] = True
+    cfg.agent_proxy["eval-estimation-multi"] = False
+    cfg.agent_proxy["enable_think"] = True
+    cfg["model_config"] = {"model_name": "OpenAI-5.2-Thinking"}
+    cfg["model_info"] = {
+        "OpenAI-5.2-Thinking": {
+            "provider_name": "openai",
+            "model_name": "gpt-5.2",
+        }
+    }
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+    ctx.env_config_lookup = {0: {"max_tokens": 128, "env_tag": "GPQAMain", "env_type": "gpqa_main"}}
+
+    format_prompt, _ = ctx._build_format_prompt(0)
+
+    assert format_prompt.count("<budget-thinking>") == 1
+    assert "<think>" in format_prompt
+    assert "<token_estimation>" in format_prompt
+    assert "<answer>" in format_prompt
+
+
+def test_openai_reasoning_parse_response_requires_visible_think_tags(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["enable_think"] = True
+    cfg["model_config"] = {"model_name": "OpenAI-5.2-Thinking"}
+    cfg["model_info"] = {
+        "OpenAI-5.2-Thinking": {
+            "provider_name": "openai",
+            "model_name": "gpt-5.2",
+        }
+    }
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+
+    llm_response, actions = ctx._parse_response("<think>Plan</think><answer>Right</answer>")
+
+    assert llm_response == "<think>Plan</think><answer>Right</answer>"
+    assert actions == ["Right"]

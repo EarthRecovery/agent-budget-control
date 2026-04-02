@@ -140,9 +140,45 @@ agent_proxy:
   max_actions_per_turn: 2 # how many actions can be output at most in a single turn
   use_turn_scores: False # important to GAE when applying token-level rewards to token-level advantages. If False, will take the sum of scores as the reward for the last turn.
   enable_think: True # False -> no think RL
+  enable_ctx_wrapper: True
+  ctx_log: True
+  enable_es_wrapper: True
+  debug_reward_flow: False
+  "eval-estimation-single": False
+  "eval-estimation-multi": False
+  token_estimation: False
+  token_estimation_reward:
+    estimate_bonus: 0.2
+    accuracy_bonus_coef: 0.4
+    compliance_penalty_coef: 0.0
+  benchmark_factors:
+    enabled: false
+    mode: turn # token | turn | tool-call
+    low_bound: 0
+    high_bound: -1 # <0 means no upper bound
+    penalty_coef: 0.0
+    enable_adaptation: False
+    adaptation_happened_high_bound: 5
+    adaptation_happened_low_bound: 3
+    adaptation_high_bound: 5
+    adaptation_low_bound: 3
   reward_normalization:
     grouping: "state" # state / batch / inductive
     method: "identity" # asym_clip / identity / mean_std
+  mixed_turn_budget:
+    enabled: False
+    mixed_budget: false
+    mixed_budget_range: null
+    reward_curve:
+      use_hard: false
+      tau: 1.0
+  mixed_token_budget:
+    enabled: False
+    mixed_budget: false
+    mixed_budget_range: null
+    reward_curve:
+      use_hard: false
+      tau: 1.0
 
 # Collapse detection for diagnosing template collapse vs entropy collapse
 collapse_detection:
@@ -158,12 +194,14 @@ es_manager:
     env_groups: 8
     # under the same group, the env config and env seed are ensured to be equal
     group_size: 16
+    start_group_index: 0
     env_configs:
       tags: ["CoordSokoban"]
       n_groups: [8] # If not set, all env names divide nums equally. Under the same group, the env config and env seed (prompt) are equal in each generation
   val:
     env_groups: 512
     group_size: 1 # should be set to 1 because when val temperature is set to 0 and group size > 1, there will be repetitive prompts which leads to same trajectory.
+    start_group_index: 0
 
     env_configs:
       tags: ["CoordSokoban"]

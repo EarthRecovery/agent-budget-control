@@ -17,7 +17,7 @@ set -euo pipefail
 #   bash scripts/setup_ragen.sh                   # base only
 #   bash scripts/setup_ragen.sh --with-search     # base + search
 
-ENV_NAME="ragen"
+ENV_NAME="ragenv2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -64,7 +64,7 @@ ensure_env() {
 
 setup_search() {
     print_step "Installing search environment dependencies..."
-    pip install sentence-transformers flask
+    python -m pip install sentence-transformers flask
 
     local DATA_DIR="./search_data"
     local INDICES_DIR="${DATA_DIR}/prebuilt_indices"
@@ -147,22 +147,22 @@ main() {
     ensure_env
 
     print_step "Installing base packaging dependency"
-    pip install setuptools
+    python -m pip install setuptools
 
     print_step "Initializing git submodules"
     git submodule update --init --recursive
 
     print_step "Installing RAGEN in editable mode"
-    pip install -e . --no-deps
+    python -m pip install -e . --no-deps
 
     print_step "Installing verl dependencies for v0.6.1"
     pushd verl >/dev/null
     USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
-    pip install --no-deps -e .
+    python -m pip install --no-deps -e .
     popd >/dev/null
 
     print_step "Installing release environment dependencies"
-    pip install \
+    python -m pip install \
         IPython \
         matplotlib \
         gym \
@@ -176,7 +176,7 @@ main() {
         numpy==1.26.4
 
     # Reinstall setuptools<70 (vllm may upgrade it, breaking pkg_resources for gym_sokoban)
-    pip install "setuptools<70.0.0"
+    python -m pip install "setuptools<70.0.0"
 
     print_step "Downloading project data"
     python scripts/download_data.py
