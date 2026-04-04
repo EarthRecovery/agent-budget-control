@@ -65,6 +65,9 @@ agent_proxy:
   qwen_enable_thinking: null
   "eval-estimation-single": False
   "eval-estimation-multi": False
+  "eval-estimation-toolcall": False
+  eval_compliance_token: False
+  eval_compliance_token_scope: []
   test_generate: False
   test_string_output: "<answer></answer>"
   lm_inputs_record_path: null

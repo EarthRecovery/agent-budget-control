@@ -74,9 +74,14 @@ class SimpleMemory(BaseMemory):
 
         separator = "\n" if content else ""
         content += f"{separator}{current_turn_prefix}(Turn {actual_turn}):\n"
+        instruction = (
+            f"You have {history[turn_idx]['actions_left']} actions left. Always output: {format_prompt} "
+            "with no extra text. Strictly follow this format."
+        )
+        if length_prompt:
+            instruction += f" {length_prompt}"
         content += (
             f"State:\n{history[turn_idx]['state']}\n{warning}"
-            f"You have {history[turn_idx]['actions_left']} actions left. Always output: {format_prompt} "
-            f"with no extra text. Strictly follow this format. {length_prompt}\n"
+            f"{instruction}\n"
         )
         return content

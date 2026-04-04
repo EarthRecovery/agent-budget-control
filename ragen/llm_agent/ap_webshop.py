@@ -153,7 +153,8 @@ class ApiCallingWrapperWg:
         self.config = config
         self.tokenizer = tokenizer
         model_info = config.model_info[config.model_config.model_name]
-        self.llm_kwargs = model_info.generation_kwargs
+        self.llm_kwargs = OmegaConf.to_container(model_info.generation_kwargs, resolve=True)
+        self.api_batch_size = max(0, int(getattr(config.model_config, "api_batch_size", 0) or 0))
         
         
         api_key = OmegaConf.select(model_info, "api_key", default=None)
@@ -164,6 +165,15 @@ class ApiCallingWrapperWg:
             max_concurrency=config.model_config.max_concurrency
         )
         print(f'API-based LLM ({model_info.provider_name} - {model_info.model_name}) initialized')
+
+    def _iter_api_batches(self, messages_list):
+        if self.api_batch_size <= 0:
+            yield 0, messages_list
+            return
+
+        for start in range(0, len(messages_list), self.api_batch_size):
+            end = start + self.api_batch_size
+            yield start, messages_list[start:end]
 
 
     def generate_sequences(self, lm_inputs: DataProto) -> DataProto:
@@ -176,13 +186,20 @@ class ApiCallingWrapperWg:
             return lm_inputs
 
         messages_list = lm_inputs.non_tensor_batch['messages_list'].tolist()
-        results, failed_messages = self.llm.run_batch(
-            messages_list=messages_list,
-            **self.llm_kwargs
+        texts = [""] * len(messages_list)
+        unresolved_failed_messages = []
+        for start, batch_messages_list in self._iter_api_batches(messages_list):
+            results, failed_messages = self.llm.run_batch(
+                messages_list=batch_messages_list,
+                **self.llm_kwargs
+            )
+            unresolved_failed_messages.extend(failed_messages)
+            for offset, result in enumerate(results):
+                texts[start + offset] = result["response"]
+        assert not unresolved_failed_messages, (
+            "Failed to generate responses for the following messages: "
+            f"{unresolved_failed_messages}"
         )
-        assert not failed_messages, f"Failed to generate responses for the following messages: {failed_messages}"
-
-        texts = [result["response"] for result in results]
         print(f'[DEBUG] texts: {texts}')
         lm_outputs = DataProto()
         lm_outputs.non_tensor_batch = {

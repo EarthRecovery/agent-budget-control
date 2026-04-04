@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from verl.protocol import pad_dataproto_to_divisor, unpad_dataproto
 from .base_llm import ConcurrentLLM
+from .eval_config import (
+    expand_compliance_group_size,
+    resolve_eval_estimation_mode,
+    resolve_rollout_max_turn,
+)
 import time
 from hydra.utils import to_absolute_path
 import numpy as np
@@ -36,6 +41,9 @@ def _get_rollout_do_sample(config) -> bool:
             ),
         )
     )
+
+
+_resolve_rollout_max_turn = resolve_rollout_max_turn
 
 
 class VllmWrapperWg:  # Thi is a developing class for eval and test
@@ -147,6 +155,7 @@ class ApiCallingWrapperWg:
         self.tokenizer = tokenizer
         model_info = config.model_info[config.model_config.model_name]
         self.llm_kwargs = OmegaConf.to_container(model_info.generation_kwargs, resolve=True)
+        self.api_batch_size = max(0, int(getattr(config.model_config, "api_batch_size", 0) or 0))
         self.prompt_token_margin = int(getattr(config.model_config, "prompt_token_margin", 0) or 0)
         max_model_len = OmegaConf.select(config, "actor_rollout_ref.rollout.max_model_len", default=None)
         response_length = OmegaConf.select(config, "actor_rollout_ref.rollout.response_length", default=None)
@@ -170,6 +179,15 @@ class ApiCallingWrapperWg:
             max_concurrency=config.model_config.max_concurrency
         )
         print(f"API-based LLM ({model_info.provider_name} - {model_info.model_name}) initialized")
+
+    def _iter_api_batches(self, active_indices, active_messages_list):
+        if self.api_batch_size <= 0:
+            yield active_indices, active_messages_list
+            return
+
+        for start in range(0, len(active_messages_list), self.api_batch_size):
+            end = start + self.api_batch_size
+            yield active_indices[start:end], active_messages_list[start:end]
 
     def generate_sequences(self, lm_inputs: DataProto) -> DataProto:
         """
@@ -214,24 +232,33 @@ class ApiCallingWrapperWg:
                     active_indices.append(idx)
                     active_messages_list.append(messages)
 
-        results, failed_messages = self.llm.run_batch(
-            messages_list=active_messages_list, **self.llm_kwargs
-        ) if active_messages_list else ([], [])
-        if failed_messages:
-            print(f"[DEBUG] unresolved failed messages after retries: {len(failed_messages)}")
+        unresolved_failed_messages = []
+        for batch_indices, batch_messages_list in self._iter_api_batches(
+            active_indices,
+            active_messages_list,
+        ):
+            results, failed_messages = self.llm.run_batch(
+                messages_list=batch_messages_list, **self.llm_kwargs
+            ) if batch_messages_list else ([], [])
+            unresolved_failed_messages.extend(failed_messages)
 
-        for idx, result in zip(active_indices, results):
-            texts[idx] = result.get("response", "")
-            api_interactions[idx] = list(result.get("attempts", []) or [])
-            api_usages[idx] = result.get("usage")
-            if not result.get("success", False):
-                response_errors[idx] = {
-                    "error": result.get("error"),
-                    "error_type": result.get("error_type"),
-                    "error_code": result.get("error_code"),
-                    "status_code": result.get("status_code"),
-                    "retryable": result.get("retryable", False),
-                }
+            for idx, result in zip(batch_indices, results):
+                texts[idx] = result.get("response", "")
+                api_interactions[idx] = list(result.get("attempts", []) or [])
+                api_usages[idx] = result.get("usage")
+                if not result.get("success", False):
+                    response_errors[idx] = {
+                        "error": result.get("error"),
+                        "error_type": result.get("error_type"),
+                        "error_code": result.get("error_code"),
+                        "status_code": result.get("status_code"),
+                        "retryable": result.get("retryable", False),
+                    }
+        if unresolved_failed_messages:
+            print(
+                f"[DEBUG] unresolved failed messages after retries: "
+                f"{len(unresolved_failed_messages)}"
+            )
         print(f"[DEBUG] texts: {texts}")
         lm_outputs = DataProto()
         lm_outputs.non_tensor_batch = {
@@ -253,6 +280,7 @@ class LLMAgentProxy:
     """
 
     def __init__(self, config, actor_rollout_wg, tokenizer):
+        expand_compliance_group_size(config)
         self.config = config
         self.train_ctx_manager = ContextManager(config, tokenizer, mode="train")
         self.train_es_manager = EnvStateManager(config, mode="train")
@@ -275,27 +303,15 @@ class LLMAgentProxy:
         return getattr(agent_cfg, key.replace("-", "_"), default)
 
     def _get_eval_estimation_mode(self) -> Optional[str]:
-        single_enabled = bool(self._agent_proxy_get("eval-estimation-single", False))
-        multi_enabled = bool(self._agent_proxy_get("eval-estimation-multi", False))
-        if single_enabled and multi_enabled:
-            raise ValueError(
-                "agent_proxy.eval-estimation-single and "
-                "agent_proxy.eval-estimation-multi cannot both be True."
-            )
-        if multi_enabled:
-            return "multi"
-        if single_enabled:
-            return "single"
-        return None
+        return resolve_eval_estimation_mode(self.config)
 
     def _get_generation_suffix(self) -> str:
         eval_estimation_mode = self._get_eval_estimation_mode()
-        token_estimation_enabled = bool(getattr(self.config.agent_proxy, "token_estimation", False))
-        if eval_estimation_mode in {"single", "multi"}:
+        if eval_estimation_mode in {"single", "multi", "toolcall"}:
             return "<budget-thinking>"
-        if token_estimation_enabled:
-            return "<token_estimation>"
-        return "<budget-thinking>"
+        if bool(getattr(self.config.agent_proxy, "enable_think", False)):
+            return "<think>"
+        return "<answer>"
 
     def generate_sequences(self, lm_inputs: DataProto):
         # TODO: add kv cache both for the vllm wrapper here and for verl vllm.
@@ -326,7 +342,7 @@ class LLMAgentProxy:
         env_outputs = es_manager.reset()
         ctx_manager.reset_memory_managers()
 
-        max_turn = self.config.agent_proxy.max_turn
+        max_turn = _resolve_rollout_max_turn(self.config)
         multi_turn = max_turn > 1
         finalized = False
         last_inputs = None
@@ -401,11 +417,12 @@ class LLMAgentProxy:
         rollouts = ctx_manager.formulate_rollouts(
             rollout_states, include_collapse_data=include_collapse_data
         )
-        estimation_log_path = self.ctx_wrapper.get_estimation_log_path()
-        if estimation_log_path:
+        eval_log_path = self.ctx_wrapper.get_estimation_log_path()
+        eval_log_key = self.ctx_wrapper.get_eval_log_key()
+        if eval_log_path and eval_log_key:
             if rollouts.meta_info is None:
                 rollouts.meta_info = {}
-            rollouts.meta_info["eval_estimation_json_path"] = estimation_log_path
+            rollouts.meta_info[eval_log_key] = eval_log_path
 
         # calculate instance-level entropy
         if "entropys" in rollouts.non_tensor_batch:

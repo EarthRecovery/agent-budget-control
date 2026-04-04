@@ -256,6 +256,10 @@ class EnvStateManager:
         def _execute_actions(env, actions):
             acc_reward, turn_info, turn_done = 0, {}, False
             executed_actions = []
+            action_points_used = 0
+            budget_max = None
+            budget_remaining = None
+            budget_enabled = False
             for action in actions:
                 _, reward, done, info = env.step(action)
                 self._debug_reward(
@@ -264,12 +268,44 @@ class EnvStateManager:
                 acc_reward += reward
                 turn_info.update(info) # NOTE: currently use last info for multi-action
                 executed_actions.append(action)
+                if info.get("budget_enabled", False):
+                    budget_enabled = True
+                    if info.get("budget_max") is not None:
+                        budget_max = int(info.get("budget_max"))
+                    if info.get("budget_remaining") is not None:
+                        budget_remaining = int(info.get("budget_remaining"))
+                    if info.get("action_is_effective", True):
+                        action_points_used += max(0, int(info.get("budget_action_cost", 0) or 0))
                 if done:
                     turn_done = True
                     break
-            return acc_reward, turn_info, turn_done, executed_actions
+            return (
+                acc_reward,
+                turn_info,
+                turn_done,
+                executed_actions,
+                action_points_used,
+                budget_enabled,
+                budget_max,
+                budget_remaining,
+            )
 
-        def _log_env_state(status, history, cur_obs, max_actions_per_traj, executed_actions, all_actions, acc_reward, turn_done, turn_info, env_input):
+        def _log_env_state(
+            status,
+            history,
+            cur_obs,
+            max_actions_per_traj,
+            executed_actions,
+            all_actions,
+            acc_reward,
+            turn_done,
+            turn_info,
+            env_input,
+            action_points_used,
+            budget_enabled,
+            budget_max,
+            budget_remaining,
+        ):
             obs = self._handle_mm_state(cur_obs)
             status.num_actions += len(executed_actions)
             status.rewards.append(acc_reward) # NOTE use turn-wise acc_reward
@@ -286,11 +322,15 @@ class EnvStateManager:
                 'llm_error_code': env_input.get('llm_error_code'),
                 'llm_error_status_code': env_input.get('llm_error_status_code'),
                 'llm_error_retryable': env_input.get('llm_error_retryable'),
+                'action_points_used': int(action_points_used),
+                'budget_enabled': bool(budget_enabled),
+                'budget_max': budget_max,
+                'budget_remaining': budget_remaining,
             })
             self._debug_reward(
                 f"history_update env_id={env_input['env_id']}, executed_actions={executed_actions}, "
                 f"acc_reward={float(acc_reward):.4f}, turn_done={turn_done}, success={turn_info.get('success', None)}, "
-                f"token_count={env_input.get('response_tokens', 0)}"
+                f"token_count={env_input.get('response_tokens', 0)}, action_points_used={int(action_points_used)}"
             )
             # filter out invalid actions
             # history = [content for content in history[:-1] if content['actions']] + [history[-1]]
@@ -309,7 +349,16 @@ class EnvStateManager:
 
             # execute actions in envs
             valid_actions = self._extract_map_valid_actions(entry, env_input['actions'])
-            acc_reward, turn_info, turn_done, executed_actions = _execute_actions(env, valid_actions[:actions_left_before])
+            (
+                acc_reward,
+                turn_info,
+                turn_done,
+                executed_actions,
+                action_points_used,
+                budget_enabled,
+                budget_max,
+                budget_remaining,
+            ) = _execute_actions(env, valid_actions[:actions_left_before])
             no_manager_action = len(valid_actions) == 0
             penalty_delta = 0.0
             if len(valid_actions) != len(env_input['actions']) or not valid_actions:
@@ -318,7 +367,22 @@ class EnvStateManager:
                 turn_info = dict(turn_info)
                 turn_info['manager_invalid_action'] = True
 
-            status, history = _log_env_state(entry['status'], self.rollout_cache[env_id]['history'], entry['env'].render(), entry['max_actions_per_traj'], executed_actions, valid_actions, acc_reward, turn_done, turn_info, env_input)
+            status, history = _log_env_state(
+                entry['status'],
+                self.rollout_cache[env_id]['history'],
+                entry['env'].render(),
+                entry['max_actions_per_traj'],
+                executed_actions,
+                valid_actions,
+                acc_reward,
+                turn_done,
+                turn_info,
+                env_input,
+                action_points_used,
+                budget_enabled,
+                budget_max,
+                budget_remaining,
+            )
             if no_manager_action and history:
                 history[-1]['manager_invalid_action'] = True
             if status.num_actions >= entry['max_actions_per_traj'] and not turn_done:

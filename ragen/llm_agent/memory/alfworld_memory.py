@@ -155,10 +155,15 @@ class AlfWorldMemory(BaseMemory):
             )
 
         # 7. Format instructions
-        content_parts.append(
+        instruction = (
             f"Now it's your turn to take an action. "
             f"You have {history[turn_idx]['actions_left']} actions left. "
-            f"Always output: {format_prompt} with no extra text. {length_prompt}"
+            f"Always output: {format_prompt} with no extra text."
+        )
+        if length_prompt:
+            instruction += f" {length_prompt}"
+        content_parts.append(
+            instruction
         )
 
         return "\n".join(content_parts)

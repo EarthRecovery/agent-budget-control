@@ -17,6 +17,7 @@ from transformers import AutoTokenizer
 import hydra
 from ragen.utils import register_resolvers
 from ragen.env import REGISTERED_ENV_CONFIGS
+from ragen.llm_agent.eval_config import resolve_eval_estimation_mode
 from tensordict import TensorDict
 
 from dataclasses import asdict
@@ -105,6 +106,10 @@ class ContextManager:
             "</token_estimation>",
             "<turn_estimation>",
             "</turn_estimation>",
+            "<remaining_action_points_estimation>",
+            "</remaining_action_points_estimation>",
+            "<action_points_estimation>",
+            "</action_points_estimation>",
             "<|im_start|>",
             "<|im_end|>",
         ]
@@ -132,26 +137,32 @@ class ContextManager:
         return getattr(agent_cfg, key.replace("-", "_"), default)
 
     def _get_eval_estimation_mode(self) -> Optional[str]:
-        single_enabled = bool(self._agent_proxy_get("eval-estimation-single", False))
-        multi_enabled = bool(self._agent_proxy_get("eval-estimation-multi", False))
-        if single_enabled and multi_enabled:
+        return resolve_eval_estimation_mode(self.config)
+
+    def _get_eval_compliance_mode(self) -> Optional[str]:
+        token_enabled = bool(self._agent_proxy_get("eval_compliance_token", False))
+        turn_enabled = bool(self._agent_proxy_get("eval_compliance_turn", False))
+        if token_enabled and turn_enabled:
             raise ValueError(
-                "agent_proxy.eval-estimation-single and "
-                "agent_proxy.eval-estimation-multi cannot both be True."
+                "agent_proxy.eval_compliance_token and "
+                "agent_proxy.eval_compliance_turn cannot both be True."
             )
-        if multi_enabled:
-            return "multi"
-        if single_enabled:
-            return "single"
+        if turn_enabled:
+            return "turn"
+        if token_enabled:
+            return "token"
         return None
+
+    def _eval_compliance_enabled(self) -> bool:
+        return self._get_eval_compliance_mode() is not None
 
     def _get_generation_prefix(self) -> str:
         eval_estimation_mode = self._get_eval_estimation_mode()
-        if eval_estimation_mode in {"single", "multi"}:
+        if eval_estimation_mode in {"single", "multi", "toolcall"}:
             return "<budget-thinking>"
-        if bool(getattr(self.config.agent_proxy, "token_estimation", False)):
-            return "<token_estimation>"
-        return "<budget-thinking>"
+        if bool(getattr(self.config.agent_proxy, "enable_think", False)):
+            return "<think>"
+        return "<answer>"
 
     def _ensure_generation_prefix(self, response: str) -> str:
         text = str(response)
@@ -198,6 +209,8 @@ class ContextManager:
                 'max_tokens': env_config.get("max_tokens", self.config.actor_rollout_ref.rollout.response_length),
                 'env_tag': env_tag,
                 'env_type': env_config.env_type,
+                'enable_action_budget': env_config_new.get("enable_action_budget", False),
+                'max_action_points': env_config_new.get("max_action_points"),
             }
 
         tags = self.es_cfg.env_configs.tags
@@ -612,18 +625,27 @@ class ContextManager:
                 "<token_estimation> [Your estimated token count] </token_estimation> "
                 f"{answer_format}"
             )
-        else:
+        elif eval_estimation_mode == "toolcall":
             FORMAT_PROMPT = (
-                "<budget-thinking> [Your budget-related reasoning] </budget-thinking> "
+                "<budget-thinking> [Your action-budget-related reasoning] </budget-thinking> "
+                "<remaining_action_points_estimation> "
+                "[Your estimated remaining action points needed to finish, including this turn] "
+                "</remaining_action_points_estimation> "
+                "<action_points_estimation> [Your estimated action points used in this turn] </action_points_estimation> "
                 f"{answer_format}"
             )
+        else:
+            FORMAT_PROMPT = answer_format
         env_meta = self.env_config_lookup[env_id]
         if env_meta.get("env_tag") == "DeepCoder" or env_meta.get("env_type") == "deepcoder":
             FORMAT_PROMPT += (
                 " Inside <answer>, output raw Python code only. "
                 "Do not use Markdown code fences, triple backticks, backticks, or any explanation."
             )
-        LENGTH_PROMPT = f"Max response length: {env_meta['max_tokens']} words (tokens)."
+        if self._eval_compliance_enabled():
+            LENGTH_PROMPT = ""
+        else:
+            LENGTH_PROMPT = f"Max response length: {env_meta['max_tokens']} words (tokens)."
         return FORMAT_PROMPT, LENGTH_PROMPT
 
     def _build_system_content(self, env_id: int) -> str:
@@ -720,11 +742,17 @@ class ContextManager:
         if include_warning and turn.get('manager_invalid_action'):
             warning = "No valid action provided previously. Environment state remains the same. Please try again.\n"
 
+        instruction = (
+            f"You have {turn['actions_left']} actions left. Always output: {FORMAT_PROMPT} "
+            "with no extra text. Strictly follow this format."
+        )
+        if LENGTH_PROMPT:
+            instruction += f" {LENGTH_PROMPT}"
+
         content = f"\nTurn {turn_number}:\n"
         content += (
             f"State:\n{turn['state']}\n{warning}"
-            f"You have {turn['actions_left']} actions left. Always output: {FORMAT_PROMPT} "
-            f"with no extra text. Strictly follow this format. {LENGTH_PROMPT}\n"
+            f"{instruction}\n"
         )
         return content
 

@@ -1,0 +1,17 @@
+{
+  "move": 1,
+  "pick-up-item": 1,
+  "place-item": 1,
+  "pick-up-container": 1,
+  "place-container": 1,
+  "cook": 2,
+  "cut": 2,
+  "fry": 2,
+  "fill-pot": 2,
+  "boil-water": 2,
+  "add-to": 1,
+  "fill-bowl": 2,
+  "stack": 1,
+  "unstack": 1,
+  "wait": 1
+}

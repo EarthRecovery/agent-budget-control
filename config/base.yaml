@@ -146,6 +146,9 @@ agent_proxy:
   debug_reward_flow: False
   "eval-estimation-single": False
   "eval-estimation-multi": False
+  "eval-estimation-toolcall": False
+  eval_compliance_token: False
+  eval_compliance_token_scope: []
   token_estimation: False
   token_estimation_reward:
     estimate_bonus: 0.2

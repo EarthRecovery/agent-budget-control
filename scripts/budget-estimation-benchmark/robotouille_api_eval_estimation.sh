@@ -25,6 +25,7 @@ MAX_TOKENS=${MAX_TOKENS:-768}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-8192}
 MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-8192}
 PROMPT_TOKEN_MARGIN=${PROMPT_TOKEN_MARGIN:-1024}
+MAX_ACTION_POINTS=${MAX_ACTION_POINTS:-30}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/budget-estimation-benchmark"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/robotouille-512-gpt5.2-Instant"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
@@ -35,7 +36,8 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   model_config.model_name="${MODEL_NAME}" \
   agent_proxy.enable_think=True \
   "agent_proxy.eval-estimation-single=False" \
-  "agent_proxy.eval-estimation-multi=True" \
+  "agent_proxy.eval-estimation-multi=False" \
+  "agent_proxy.eval-estimation-toolcall=True" \
   agent_proxy.max_turn=${MAX_TURN} \
   agent_proxy.max_actions_per_turn=${MAX_ACTIONS_PER_TURN} \
   es_manager.val.env_groups=${VAL_GROUPS} \
@@ -47,6 +49,8 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   "custom_envs.Robotouille.env_instruction='You are controlling a kitchen robot. Choose exactly one action from the provided Valid Actions list. Think about the next state change, then inside <answer> output the exact action string only. Do not output multiple actions or any explanation inside <answer>.'" \
   custom_envs.Robotouille.env_config.env_name="${ENV_NAME}" \
   custom_envs.Robotouille.env_config.max_steps=${ENV_MAX_STEPS} \
+  custom_envs.Robotouille.env_config.enable_action_budget=True \
+  custom_envs.Robotouille.env_config.max_action_points=${MAX_ACTION_POINTS} \
   custom_envs.Robotouille.max_actions_per_traj=${MAX_ACTIONS_PER_TRAJ} \
   custom_envs.Robotouille.max_tokens=${MAX_TOKENS} \
   actor_rollout_ref.rollout.max_model_len=${MAX_MODEL_LEN} \
