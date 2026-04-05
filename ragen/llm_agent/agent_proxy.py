@@ -21,6 +21,7 @@ from hydra.utils import to_absolute_path
 import numpy as np
 from omegaconf import OmegaConf, open_dict
 import wandb
+import httpx
 
 
 def _get_rollout_val_kwarg(ro_config, key: str, default=None):
@@ -172,11 +173,31 @@ class ApiCallingWrapperWg:
             )
 
         api_key = OmegaConf.select(model_info, "api_key", default=None)
+        connect_timeout_seconds = OmegaConf.select(
+            config,
+            "model_config.api_connect_timeout_seconds",
+            default=None,
+        )
+        request_timeout_seconds = OmegaConf.select(
+            config,
+            "model_config.api_request_timeout_seconds",
+            default=None,
+        )
+        client_timeout = None
+        if connect_timeout_seconds is not None or request_timeout_seconds is not None:
+            default_timeout_seconds = 600.0
+            if request_timeout_seconds is not None:
+                default_timeout_seconds = float(request_timeout_seconds)
+            timeout_kwargs = {"timeout": default_timeout_seconds}
+            if connect_timeout_seconds is not None:
+                timeout_kwargs["connect"] = float(connect_timeout_seconds)
+            client_timeout = httpx.Timeout(**timeout_kwargs)
         self.llm = ConcurrentLLM(
 			provider=model_info.provider_name,
             model_name=model_info.model_name,
             api_key=api_key,
-            max_concurrency=config.model_config.max_concurrency
+            max_concurrency=config.model_config.max_concurrency,
+            timeout=client_timeout,
         )
         print(f"API-based LLM ({model_info.provider_name} - {model_info.model_name}) initialized")
 

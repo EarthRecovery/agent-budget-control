@@ -60,11 +60,25 @@ class RobotouilleEnv(BaseDiscreteActionEnv):
             f"Action Points Remaining: {remaining}/{int(self.config.max_action_points)}"
         )
 
+    def _format_valid_action_costs(self) -> str:
+        if not self.config.enable_action_budget or not self._last_valid_actions:
+            return ""
+
+        lines = ["Valid Action Point Costs:"]
+        for action in self._last_valid_actions:
+            action_name = self._get_action_name(action)
+            action_cost = self._get_action_cost(action_name)
+            point_label = "point" if action_cost == 1 else "points"
+            lines.append(f"- {action}: {action_cost} action {point_label}")
+        return "\n".join(lines)
+
     def _attach_budget_status(self, obs: str) -> str:
         if not self.config.enable_action_budget:
             return obs
         budget_status = self._format_budget_status()
-        return f"{obs}\n\n{budget_status}" if obs else budget_status
+        action_costs = self._format_valid_action_costs()
+        sections = [section for section in (obs, budget_status, action_costs) if section]
+        return "\n\n".join(sections)
 
     def _get_action_name(self, chosen_action: str) -> str:
         mapped_name = self._last_action_names.get(chosen_action)
@@ -101,6 +115,16 @@ class RobotouilleEnv(BaseDiscreteActionEnv):
             "budget_exhausted": bool(budget_exhausted),
         }
 
+    def _build_goal_progress_info(self) -> Dict:
+        satisfied = int(self._count_goal_predicates())
+        total = int(self._count_total_goal_predicates())
+        ratio = 0.0 if total <= 0 else float(satisfied) / float(total)
+        return {
+            "goal_predicates_satisfied": satisfied,
+            "goal_predicates_total": total,
+            "goal_predicate_ratio_reward": float(ratio),
+        }
+
     def _init_env(self):
         _ensure_robotouille_on_path()
         from robotouille.robotouille_env import create_robotouille_env
@@ -109,6 +133,7 @@ class RobotouilleEnv(BaseDiscreteActionEnv):
             self.config.env_name,
             self.config.seed,
             self.config.noisy_randomization,
+            enable_rendering=False,
         )
 
     def _extract_valid_actions(self):
@@ -172,6 +197,7 @@ class RobotouilleEnv(BaseDiscreteActionEnv):
                 "success": False,
             }
             info.update(self._build_budget_info())
+            info.update(self._build_goal_progress_info())
             return self.render(), 0.0, False, info
 
         action_name = self._get_action_name(chosen_action)
@@ -197,6 +223,7 @@ class RobotouilleEnv(BaseDiscreteActionEnv):
                         budget_exhausted=True,
                     )
                 )
+                info.update(self._build_goal_progress_info())
                 return self.render(), 0.0, True, info
 
         prev_best_goal_count = self._best_goal_count
@@ -238,6 +265,7 @@ class RobotouilleEnv(BaseDiscreteActionEnv):
                 budget_exhausted=budget_exhausted and not bool(success_done),
             )
         )
+        info.update(self._build_goal_progress_info())
         print(
             f"Action {self._action_count}: {chosen_action} | reward={reward} | "
             f"action_cost={action_cost} | budget_remaining={info.get('budget_remaining')}",

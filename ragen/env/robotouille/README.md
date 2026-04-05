@@ -16,6 +16,7 @@ The Robotouille environment config now exposes two budget-related fields in [con
 - The remaining budget is appended to the rendered text observation as:
   - `Action Budget: enabled`
   - `Action Points Remaining: current/max`
+- The rendered text observation also appends a `Valid Action Point Costs:` section that lists each currently valid action together with its per-action-point cost.
 - The `info` dictionary returned by `step()` also includes:
   - `budget_enabled`
   - `budget_max`

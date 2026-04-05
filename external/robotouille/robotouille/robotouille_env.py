@@ -1,9 +1,18 @@
-from renderer.renderer import RobotouilleRenderer
 from environments.env_generator import builder
 from environments.env_generator import procedural_generator
 from robotouille.env import RobotouilleEnv
 import os
 import json
+
+
+class _NullRenderer:
+    def reset(self):
+        return None
+
+    def render(self, state, mode='human', close=False):
+        raise RuntimeError(
+            "Robotouille rendering is disabled for this environment instance."
+        )
 
 def _parse_renderer_layout(environment_json):
     """
@@ -57,7 +66,7 @@ def _procedurally_generate(environment_json, seed, noisy_randomization):
             seed += 1
     return generated_environment_json
 
-def create_robotouille_env(problem_filename, seed=None, noisy_randomization=False):
+def create_robotouille_env(problem_filename, seed=None, noisy_randomization=False, enable_rendering=True):
     """
     Creates and returns an Robotouille environment.
 
@@ -78,10 +87,20 @@ def create_robotouille_env(problem_filename, seed=None, noisy_randomization=Fals
     environment_json = builder.load_environment(json_filename)
     if seed is not None:
         environment_json = _procedurally_generate(environment_json, int(seed), noisy_randomization)
-    layout, tiling = _parse_renderer_layout(environment_json)
-    config_filename = os.path.normpath(os.path.join(os.path.dirname(__file__),"..","renderer","configuration","robotouille_config.json"))
     problem_string, environment_json = builder.build_problem(environment_json) # IDs objects in environment
-    renderer = RobotouilleRenderer(config_filename=config_filename, layout=layout, tiling=tiling, players=environment_json["players"])
+    if enable_rendering:
+        from renderer.renderer import RobotouilleRenderer
+
+        layout, tiling = _parse_renderer_layout(environment_json)
+        config_filename = os.path.normpath(os.path.join(os.path.dirname(__file__),"..","renderer","configuration","robotouille_config.json"))
+        renderer = RobotouilleRenderer(
+            config_filename=config_filename,
+            layout=layout,
+            tiling=tiling,
+            players=environment_json["players"],
+        )
+    else:
+        renderer = _NullRenderer()
     domain_filename = os.path.normpath(os.path.join(os.path.dirname(__file__), "..","domain", "robotouille.json"))
     with open(domain_filename, "r") as domain_file:
         domain_json = json.load(domain_file)

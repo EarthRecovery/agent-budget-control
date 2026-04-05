@@ -7,25 +7,22 @@ conda activate ragenv2
 PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/agent-budget-control"}
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
+
 # Default model is OpenAI GPT-4o.
 : "${OPENAI_API_KEY:?Please export OPENAI_API_KEY before running this benchmark.}"
 
-RUN_NAME=${RUN_NAME:-gpqa_main_api_eval_estimation}
-MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Thinking}
+RUN_NAME=${RUN_NAME:-sokoban_api_eval_estimation}
+MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-IThinking}
 VAL_GROUPS=${VAL_GROUPS:-1}
-VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-0} # 0-based: 128 means start from the 129th validation sample
 VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-0}
-GPQA_SPLIT=${GPQA_SPLIT:-train}
-MAX_TURN=${MAX_TURN:-1}
+MAX_TURN=${MAX_TURN:-10}
 MAX_ACTIONS_PER_TURN=${MAX_ACTIONS_PER_TURN:-1}
-MAX_TOKENS=${MAX_TOKENS:-5000}
+VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-0}
+MAX_TOKENS=${MAX_TOKENS:-4096}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-8192}
 MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-8192}
-API_BATCH_SIZE=${API_BATCH_SIZE:-2}
-PROMPT_TOKEN_MARGIN=${PROMPT_TOKEN_MARGIN:-512}
-API_CONNECT_TIMEOUT_SECONDS=${API_CONNECT_TIMEOUT_SECONDS:-20}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/budget-estimation-benchmark"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/gpqa-main-compliance-2-gpt5.2-Thinking-test"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/sokoban-compliance-turn-gpt5.2-Thinking-1-test"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 
 mkdir -p "$OUTPUT_DIR" "$HYDRA_DIR"
@@ -35,25 +32,21 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   agent_proxy.enable_think=True \
   "agent_proxy.eval-estimation-single=False" \
   "agent_proxy.eval-estimation-multi=False" \
-  "agent_proxy.eval_compliance_token=True" \
-  "agent_proxy.eval_compliance_token_scope=[200,400,600,800,1000]" \
+  "agent_proxy.eval_compliance_turn=True" \
+  "agent_proxy.eval_compliance_turn_scope=[2,4,6,8,10]" \
   agent_proxy.max_turn=${MAX_TURN} \
   agent_proxy.max_actions_per_turn=${MAX_ACTIONS_PER_TURN} \
   es_manager.val.env_groups=${VAL_GROUPS} \
   es_manager.val.group_size=1 \
   es_manager.val.start_group_index=${VAL_START_GROUP_INDEX} \
   es_manager.val.rollout_chunk_size=${VAL_ROLLOUT_CHUNK_SIZE} \
-  "es_manager.val.env_configs.tags=[GPQAMain]" \
+  "es_manager.val.env_configs.tags=[CoordSokoban]" \
   "es_manager.val.env_configs.n_groups=[${VAL_GROUPS}]" \
-  "custom_envs.GPQAMain.env_instruction='You are answering a multiple-choice science question. Think briefly, then inside <answer> output exactly one letter: A, B, C, or D. Do not include any explanation inside <answer>.'" \
-  ++custom_envs.GPQAMain.env_config.split="${GPQA_SPLIT}" \
-  custom_envs.GPQAMain.max_tokens=${MAX_TOKENS} \
+  "custom_envs.CoordSokoban.env_instruction='You are solving the Sokoban puzzle. Push all boxes to targets. You are given the grid and zero-indexed coordinates of the player, boxes, and targets. You can push but not pull boxes, and cannot push a box through a wall.'" \
+  custom_envs.CoordSokoban.max_tokens=${MAX_TOKENS} \
   actor_rollout_ref.rollout.max_model_len=${MAX_MODEL_LEN} \
   actor_rollout_ref.rollout.max_num_batched_tokens=${MAX_BATCHED_TOKENS} \
   actor_rollout_ref.rollout.response_length=${MAX_TOKENS} \
-  model_config.api_batch_size=${API_BATCH_SIZE} \
-  model_config.prompt_token_margin=${PROMPT_TOKEN_MARGIN} \
-  model_config.api_connect_timeout_seconds=${API_CONNECT_TIMEOUT_SECONDS} \
   output.dir="${OUTPUT_DIR}" \
   output.filename="${RUN_NAME}.pkl" \
   output.append_timestamp=True \

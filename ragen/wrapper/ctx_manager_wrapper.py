@@ -10,6 +10,10 @@ import numpy as np
 from tensordict import TensorDict
 
 from ragen.llm_agent.eval_config import (
+    resolve_eval_compliance_mode,
+    resolve_eval_compliance_turn_budget_change,
+    resolve_eval_compliance_turn_mutation_config,
+    resolve_eval_compliance_turn_mutation_turn,
     resolve_eval_estimation_mode,
     resolve_toolcall_action_point_cap,
 )
@@ -52,24 +56,16 @@ class CtxManagerWrapper:
         return resolve_eval_estimation_mode(self.config)
 
     def _get_eval_compliance_mode(self) -> Optional[str]:
-        token_enabled = bool(self._agent_proxy_get("eval_compliance_token", False))
-        turn_enabled = bool(self._agent_proxy_get("eval_compliance_turn", False))
-        if token_enabled and turn_enabled:
-            raise ValueError(
-                "agent_proxy.eval_compliance_token and "
-                "agent_proxy.eval_compliance_turn cannot both be True."
-            )
-        if turn_enabled:
-            return "turn"
-        if token_enabled:
-            return "token"
-        return None
+        return resolve_eval_compliance_mode(self.config)
 
     def _eval_compliance_token_enabled(self) -> bool:
         return self._get_eval_compliance_mode() == "token"
 
     def _eval_compliance_turn_enabled(self) -> bool:
         return self._get_eval_compliance_mode() == "turn"
+
+    def _eval_compliance_toolcall_enabled(self) -> bool:
+        return self._get_eval_compliance_mode() == "toolcall"
 
     def _eval_compliance_enabled(self) -> bool:
         return self._get_eval_compliance_mode() is not None
@@ -116,6 +112,22 @@ class CtxManagerWrapper:
             config_key="eval_compliance_turn_scope",
         )
 
+    def _get_eval_compliance_turn_mutation_turn(self) -> Optional[int]:
+        return resolve_eval_compliance_turn_mutation_turn(self.config)
+
+    def _get_eval_compliance_turn_budget_change(self) -> List[int]:
+        return resolve_eval_compliance_turn_budget_change(self.config)
+
+    def _get_eval_compliance_turn_mutation_config(self) -> Optional[Tuple[int, List[int]]]:
+        return resolve_eval_compliance_turn_mutation_config(self.config)
+
+    def _get_eval_compliance_toolcall_scope(self) -> List[int]:
+        raw_scope = self._agent_proxy_get("eval_compliance_toolcall_scope", [])
+        return self._normalize_eval_compliance_scope(
+            raw_scope,
+            config_key="eval_compliance_toolcall_scope",
+        )
+
     def _get_active_eval_log_mode(self) -> Optional[str]:
         eval_estimation_mode = self._get_eval_estimation_mode()
         if eval_estimation_mode is not None:
@@ -125,6 +137,8 @@ class CtxManagerWrapper:
             return "compliance_token"
         if compliance_mode == "turn":
             return "compliance_turn"
+        if compliance_mode == "toolcall":
+            return "compliance_toolcall"
         return None
 
     def _validate_eval_modes(self) -> None:
@@ -132,7 +146,7 @@ class CtxManagerWrapper:
         compliance_mode = self._get_eval_compliance_mode()
         if eval_estimation_mode is not None and compliance_mode is not None:
             raise ValueError(
-                "agent_proxy.eval_compliance_token or agent_proxy.eval_compliance_turn cannot be enabled together with "
+                "agent_proxy.eval_compliance_token, agent_proxy.eval_compliance_turn, or agent_proxy.eval_compliance_toolcall cannot be enabled together with "
                 "agent_proxy.eval-estimation-single, agent_proxy.eval-estimation-multi, or agent_proxy.eval-estimation-toolcall."
             )
         if compliance_mode == "token" and not self._get_eval_compliance_token_scope():
@@ -140,12 +154,29 @@ class CtxManagerWrapper:
                 "agent_proxy.eval_compliance_token is enabled, but "
                 "agent_proxy.eval_compliance_token_scope is empty."
             )
-        if compliance_mode == "turn" and not self._get_eval_compliance_turn_scope():
+        if compliance_mode == "turn":
+            turn_scope = self._get_eval_compliance_turn_scope()
+            turn_mutation_cfg = self._get_eval_compliance_turn_mutation_config()
+            if turn_scope and turn_mutation_cfg is not None:
+                raise ValueError(
+                    "agent_proxy.eval_compliance_turn_scope cannot be used together with "
+                    "agent_proxy.eval_compliance_turn_mutation_turn / "
+                    "agent_proxy.eval_compliance_turn_budget_change."
+                )
+            if not turn_scope and turn_mutation_cfg is None:
+                raise ValueError(
+                    "agent_proxy.eval_compliance_turn is enabled, but neither "
+                    "agent_proxy.eval_compliance_turn_scope nor the mutation-based turn compliance "
+                    "configuration is set."
+                )
+        if compliance_mode == "toolcall" and not self._get_eval_compliance_toolcall_scope():
             raise ValueError(
-                "agent_proxy.eval_compliance_turn is enabled, but "
-                "agent_proxy.eval_compliance_turn_scope is empty."
+                "agent_proxy.eval_compliance_toolcall is enabled, but "
+                "agent_proxy.eval_compliance_toolcall_scope is empty."
             )
         if eval_estimation_mode == "toolcall":
+            resolve_toolcall_action_point_cap(self.config)
+        if compliance_mode == "toolcall":
             resolve_toolcall_action_point_cap(self.config)
 
     def _eval_estimation_enabled(self) -> bool:
@@ -190,7 +221,7 @@ class CtxManagerWrapper:
         mode = self._get_active_eval_log_mode()
         suffix = (
             "_eval_compliance_dialogues.json"
-            if mode in {"compliance_token", "compliance_turn"}
+            if mode in {"compliance_token", "compliance_turn", "compliance_toolcall"}
             else "_eval_estimation_dialogues.json"
         )
         return os.path.join(
@@ -205,7 +236,7 @@ class CtxManagerWrapper:
         mode = self._get_active_eval_log_mode()
         if mode in {"single", "multi", "toolcall"}:
             return "eval_estimation_json_path"
-        if mode in {"compliance_token", "compliance_turn"}:
+        if mode in {"compliance_token", "compliance_turn", "compliance_toolcall"}:
             return "eval_compliance_json_path"
         return None
 
@@ -268,6 +299,10 @@ class CtxManagerWrapper:
                     "compliance_token_limit": record.get("compliance_token_limit"),
                     "eval_compliance_turn_scope": record.get("eval_compliance_turn_scope"),
                     "compliance_turn_limit": record.get("compliance_turn_limit"),
+                    "eval_compliance_turn_mutation_turn": record.get("eval_compliance_turn_mutation_turn"),
+                    "eval_compliance_turn_budget_change": record.get("eval_compliance_turn_budget_change"),
+                    "eval_compliance_toolcall_scope": record.get("eval_compliance_toolcall_scope"),
+                    "compliance_toolcall_limit": record.get("compliance_toolcall_limit"),
                     "max_action_points": record.get("max_action_points"),
                     "budget_turn": record.get("budget_turn"),
                     "budget_token": record.get("budget_token"),
@@ -275,6 +310,11 @@ class CtxManagerWrapper:
                     "within_turn_limit": record.get("within_turn_limit"),
                     "turn_limit_delta": record.get("turn_limit_delta"),
                     "success_within_turn_limit": record.get("success_within_turn_limit"),
+                    "total_action_points_used": record.get("total_action_points_used"),
+                    "total_toolcalls_used": record.get("total_toolcalls_used"),
+                    "within_toolcall_limit": record.get("within_toolcall_limit"),
+                    "toolcall_limit_delta": record.get("toolcall_limit_delta"),
+                    "success_within_toolcall_limit": record.get("success_within_toolcall_limit"),
                     "initial_state": record.get("initial_state"),
                     "final_state": record.get("final_state"),
                     "api_interaction_count": api_interaction_count,
@@ -329,6 +369,7 @@ class CtxManagerWrapper:
         eval_mode = self._get_eval_estimation_mode()
         compliance_token_scope = self._get_eval_compliance_token_scope()
         compliance_turn_scope = self._get_eval_compliance_turn_scope()
+        compliance_toolcall_scope = self._get_eval_compliance_toolcall_scope()
         toolcall_cap = self._get_toolcall_action_point_cap()
         for rollout_state in rollout_states:
             env_id = int(rollout_state.get("env_id"))
@@ -347,8 +388,17 @@ class CtxManagerWrapper:
                 self._get_eval_compliance_turn_limit_for_env(
                     env_id=env_id,
                     group_id=None if group_id is None else int(group_id),
+                    current_turn=None,
                 )
                 if self._eval_compliance_turn_enabled()
+                else None
+            )
+            compliance_toolcall_limit = (
+                self._get_eval_compliance_toolcall_limit_for_env(
+                    env_id=env_id,
+                    group_id=None if group_id is None else int(group_id),
+                )
+                if self._eval_compliance_toolcall_enabled()
                 else None
             )
             if compliance_token_scope:
@@ -357,8 +407,17 @@ class CtxManagerWrapper:
                 env_record["compliance_token_limit"] = compliance_token_limit
             if compliance_turn_scope:
                 env_record["eval_compliance_turn_scope"] = list(compliance_turn_scope)
+            turn_mutation_cfg = self._get_eval_compliance_turn_mutation_config()
+            if turn_mutation_cfg is not None:
+                mutation_turn, budget_change = turn_mutation_cfg
+                env_record["eval_compliance_turn_mutation_turn"] = int(mutation_turn)
+                env_record["eval_compliance_turn_budget_change"] = list(budget_change)
             if compliance_turn_limit is not None:
                 env_record["compliance_turn_limit"] = compliance_turn_limit
+            if compliance_toolcall_scope:
+                env_record["eval_compliance_toolcall_scope"] = list(compliance_toolcall_scope)
+            if compliance_toolcall_limit is not None:
+                env_record["compliance_toolcall_limit"] = compliance_toolcall_limit
             if toolcall_cap is not None:
                 env_record["max_action_points"] = int(toolcall_cap)
             env_record["tag"] = rollout_state.get("tag")
@@ -372,6 +431,9 @@ class CtxManagerWrapper:
                 for turn in reward_turns
             ]
             env_record["total_turns"] = len(reward_turns)
+            total_action_points_used = int(sum(reward_turn_action_points))
+            env_record["total_action_points_used"] = total_action_points_used
+            env_record["total_toolcalls_used"] = total_action_points_used
             if history:
                 env_record["initial_state"] = history[0].get("state")
                 env_record["final_state"] = history[-1].get("state")
@@ -379,6 +441,7 @@ class CtxManagerWrapper:
             rollout_success = False
             for turn_idx, turn in enumerate(reward_turns, start=1):
                 turn_record = self._ensure_turn_record(env_record, turn_idx)
+                turn_info = (turn.get("info", {}) or {}).copy()
                 generation_error = turn.get("llm_error") or turn_record.get("generation_error")
                 if generation_error:
                     llm_raw_response = str(
@@ -396,14 +459,29 @@ class CtxManagerWrapper:
                     )
                 actual_token = max(0, int(turn.get("token_count", 0) or 0))
                 actual_action_points = reward_turn_action_points[turn_idx - 1]
+                rollout_reward = turn.get("reward")
+                goal_ratio_reward = turn_info.get("goal_predicate_ratio_reward")
 
                 turn_record["raw_response"] = llm_raw_response
                 turn_record["parsed_response"] = "" if generation_error else turn.get("llm_response")
                 turn_record["actions"] = list(turn.get("actions", []) or [])
-                turn_record["reward"] = turn.get("reward")
-                turn_record["success"] = bool(turn.get("info", {}).get("success", False))
+                turn_record["reward"] = (
+                    float(goal_ratio_reward)
+                    if goal_ratio_reward is not None
+                    else rollout_reward
+                )
+                if goal_ratio_reward is not None:
+                    turn_record["rollout_reward"] = rollout_reward
+                    turn_record["reward_source"] = "goal_predicate_ratio"
+                turn_record["success"] = bool(turn_info.get("success", False))
                 rollout_success = rollout_success or bool(turn_record["success"])
                 turn_record["actual_token"] = actual_token
+                if "goal_predicates_satisfied" in turn_info:
+                    turn_record["goal_predicates_satisfied"] = int(turn_info.get("goal_predicates_satisfied", 0) or 0)
+                if "goal_predicates_total" in turn_info:
+                    turn_record["goal_predicates_total"] = int(turn_info.get("goal_predicates_total", 0) or 0)
+                if goal_ratio_reward is not None:
+                    turn_record["goal_predicate_ratio_reward"] = float(goal_ratio_reward)
                 turn_record["generation_error"] = generation_error
                 turn_record["generation_error_type"] = (
                     turn.get("llm_error_type") or turn_record.get("generation_error_type")
@@ -472,9 +550,11 @@ class CtxManagerWrapper:
 
                 if self._eval_compliance_turn_enabled():
                     compliance_turn_limit = (
-                        turn_record.get("compliance_turn_limit")
-                        if turn_record.get("compliance_turn_limit") is not None
-                        else env_record.get("compliance_turn_limit")
+                        self._get_eval_compliance_turn_limit_for_env(
+                            env_id=env_id,
+                            group_id=None if group_id is None else int(group_id),
+                            current_turn=turn_idx,
+                        )
                     )
                     turn_budget_distance = (
                         None
@@ -502,8 +582,55 @@ class CtxManagerWrapper:
                             int(turn_idx),
                         )
 
+                if self._eval_compliance_toolcall_enabled():
+                    compliance_toolcall_limit = (
+                        turn_record.get("compliance_toolcall_limit")
+                        if turn_record.get("compliance_toolcall_limit") is not None
+                        else env_record.get("compliance_toolcall_limit")
+                    )
+                    action_points_used_before_turn = int(sum(reward_turn_action_points[: turn_idx - 1]))
+                    cumulative_action_points_used = int(sum(reward_turn_action_points[:turn_idx]))
+                    remaining_before_turn = (
+                        None
+                        if compliance_toolcall_limit is None
+                        else int(compliance_toolcall_limit) - action_points_used_before_turn
+                    )
+                    remaining_after_turn = (
+                        None
+                        if compliance_toolcall_limit is None
+                        else int(compliance_toolcall_limit) - cumulative_action_points_used
+                    )
+                    within_toolcall_limit_so_far = (
+                        None
+                        if compliance_toolcall_limit is None
+                        else cumulative_action_points_used <= int(compliance_toolcall_limit)
+                    )
+                    exceeded_toolcall_limit = (
+                        None
+                        if compliance_toolcall_limit is None
+                        else cumulative_action_points_used > int(compliance_toolcall_limit)
+                    )
+                    turn_record["compliance_toolcall_limit"] = compliance_toolcall_limit
+                    turn_record["action_points_used_before_turn"] = action_points_used_before_turn
+                    turn_record["remaining_action_points_before_turn"] = remaining_before_turn
+                    turn_record["actual_action_points"] = actual_action_points
+                    turn_record["cumulative_action_points_used"] = cumulative_action_points_used
+                    turn_record["remaining_action_points_after_turn"] = remaining_after_turn
+                    turn_record["within_toolcall_limit_so_far"] = within_toolcall_limit_so_far
+                    turn_record["exceeded_toolcall_limit"] = exceeded_toolcall_limit
+                    if compliance_toolcall_limit is not None:
+                        turn_record["compliance_instruction"] = self._build_eval_compliance_toolcall_note(
+                            int(compliance_toolcall_limit),
+                            action_points_used_before_turn,
+                        )
+
             if self._eval_compliance_turn_enabled():
-                env_turn_limit = env_record.get("compliance_turn_limit")
+                env_turn_limit = self._get_eval_compliance_turn_limit_for_env(
+                    env_id=env_id,
+                    group_id=None if group_id is None else int(group_id),
+                    current_turn=int(env_record["total_turns"]),
+                )
+                env_record["compliance_turn_limit"] = env_turn_limit
                 within_turn_limit = (
                     None
                     if env_turn_limit is None
@@ -517,6 +644,23 @@ class CtxManagerWrapper:
                 )
                 env_record["success_within_turn_limit"] = bool(
                     rollout_success and within_turn_limit is True
+                )
+
+            if self._eval_compliance_toolcall_enabled():
+                env_toolcall_limit = env_record.get("compliance_toolcall_limit")
+                within_toolcall_limit = (
+                    None
+                    if env_toolcall_limit is None
+                    else int(total_action_points_used) <= int(env_toolcall_limit)
+                )
+                env_record["within_toolcall_limit"] = within_toolcall_limit
+                env_record["toolcall_limit_delta"] = (
+                    None
+                    if env_toolcall_limit is None
+                    else int(total_action_points_used) - int(env_toolcall_limit)
+                )
+                env_record["success_within_toolcall_limit"] = bool(
+                    rollout_success and within_toolcall_limit is True
                 )
 
         self._pending_turn_records = {}
@@ -682,8 +826,24 @@ class CtxManagerWrapper:
         self,
         env_id: int,
         group_id: Optional[int] = None,
+        current_turn: Optional[int] = None,
     ) -> Optional[int]:
+        mutation_cfg = self._get_eval_compliance_turn_mutation_config()
+        if mutation_cfg is not None:
+            mutation_turn, budget_change = mutation_cfg
+            resolved_turn = int(self.turn_idx + 1) if current_turn is None else int(current_turn)
+            if resolved_turn <= int(mutation_turn):
+                return int(budget_change[0])
+            return int(budget_change[1])
         scope = self._get_eval_compliance_turn_scope()
+        return self._get_eval_compliance_limit_for_env(scope, env_id, group_id)
+
+    def _get_eval_compliance_toolcall_limit_for_env(
+        self,
+        env_id: int,
+        group_id: Optional[int] = None,
+    ) -> Optional[int]:
+        scope = self._get_eval_compliance_toolcall_scope()
         return self._get_eval_compliance_limit_for_env(scope, env_id, group_id)
 
     def _get_toolcall_action_point_cap(self) -> Optional[int]:
@@ -728,6 +888,7 @@ class CtxManagerWrapper:
         env_ids = self._to_list(non_tensor_batch.get("env_ids"))
         group_ids = self._to_list(non_tensor_batch.get("group_ids"))
         uid_list = self._to_list(non_tensor_batch.get("uid"))
+        action_points_used_so_far = self._to_list(non_tensor_batch.get("action_points_used_so_far"))
         turn_idx = int(self.turn_idx + 1)
         toolcall_cap = self._get_toolcall_action_point_cap()
 
@@ -741,6 +902,16 @@ class CtxManagerWrapper:
             compliance_turn_limit = self._get_eval_compliance_turn_limit_for_env(
                 env_id=int(env_id),
                 group_id=None if group_id is None else int(group_id),
+                current_turn=turn_idx,
+            )
+            compliance_toolcall_limit = self._get_eval_compliance_toolcall_limit_for_env(
+                env_id=int(env_id),
+                group_id=None if group_id is None else int(group_id),
+            )
+            action_points_used_before_turn = (
+                int(action_points_used_so_far[idx])
+                if idx < len(action_points_used_so_far) and action_points_used_so_far[idx] is not None
+                else 0
             )
             env_record = self._ensure_env_record(env_id, group_id=group_id, uid=uid)
             if toolcall_cap is not None:
@@ -754,6 +925,16 @@ class CtxManagerWrapper:
                 env_record["compliance_turn_limit"] = compliance_turn_limit
                 env_record["eval_compliance_turn_scope"] = list(
                     self._get_eval_compliance_turn_scope()
+                )
+            turn_mutation_cfg = self._get_eval_compliance_turn_mutation_config()
+            if turn_mutation_cfg is not None:
+                mutation_turn, budget_change = turn_mutation_cfg
+                env_record["eval_compliance_turn_mutation_turn"] = int(mutation_turn)
+                env_record["eval_compliance_turn_budget_change"] = list(budget_change)
+            if compliance_toolcall_limit is not None:
+                env_record["compliance_toolcall_limit"] = compliance_toolcall_limit
+                env_record["eval_compliance_toolcall_scope"] = list(
+                    self._get_eval_compliance_toolcall_scope()
                 )
             turn_record = self._ensure_turn_record(env_record, turn_idx)
             turn_record["mode"] = self.mode
@@ -776,6 +957,23 @@ class CtxManagerWrapper:
                 turn_record["compliance_instruction"] = self._build_eval_compliance_turn_note(
                     int(compliance_turn_limit),
                     int(turn_idx),
+                )
+            if compliance_toolcall_limit is not None:
+                remaining_action_points_before_turn = int(compliance_toolcall_limit) - int(
+                    action_points_used_before_turn
+                )
+                turn_record["compliance_toolcall_limit"] = compliance_toolcall_limit
+                turn_record["action_points_used_before_turn"] = action_points_used_before_turn
+                turn_record["remaining_action_points_before_turn"] = remaining_action_points_before_turn
+                turn_record["within_toolcall_limit_so_far"] = (
+                    int(action_points_used_before_turn) <= int(compliance_toolcall_limit)
+                )
+                turn_record["exceeded_toolcall_limit"] = (
+                    int(action_points_used_before_turn) > int(compliance_toolcall_limit)
+                )
+                turn_record["compliance_instruction"] = self._build_eval_compliance_toolcall_note(
+                    int(compliance_toolcall_limit),
+                    int(action_points_used_before_turn),
                 )
             if toolcall_cap is not None:
                 turn_record["max_action_points"] = int(toolcall_cap)
@@ -1068,6 +1266,7 @@ class CtxManagerWrapper:
         current_turn: int,
     ) -> str:
         turn_budget_distance = int(compliance_turn_limit) - int(current_turn)
+        mutation_cfg = self._get_eval_compliance_turn_mutation_config()
         if turn_budget_distance > 0:
             status = f"You are {turn_budget_distance} turn(s) away from this budget."
         elif turn_budget_distance == 0:
@@ -1077,10 +1276,44 @@ class CtxManagerWrapper:
                 f"You have already exceeded this budget by "
                 f"{abs(turn_budget_distance)} turn(s)."
             )
+        mutation_note = ""
+        if mutation_cfg is not None:
+            mutation_turn, budget_change = mutation_cfg
+            mutation_note = (
+                f" Mutation turn: {int(mutation_turn)}. "
+                f"Budget schedule: {int(budget_change[0])} before or at the mutation turn, "
+                f"{int(budget_change[1])} after the mutation turn."
+            )
         return (
             "[Turn Budget Compliance] "
             f"Budget turn: {int(compliance_turn_limit)}. "
-            f"Current turn: {int(current_turn)}. "
+            f"Current turn: {int(current_turn)}."
+            f"{mutation_note} "
+            f"{status}"
+        )
+
+    def _build_eval_compliance_toolcall_note(
+        self,
+        compliance_toolcall_limit: int,
+        action_points_used_so_far: int,
+    ) -> str:
+        remaining_action_points = int(compliance_toolcall_limit) - int(action_points_used_so_far)
+        if remaining_action_points > 0:
+            status = (
+                f"You can still use {remaining_action_points} action point(s) within this budget."
+            )
+        elif remaining_action_points == 0:
+            status = (
+                "You have 0 action points remaining in this budget. Any additional tool call will exceed it."
+            )
+        else:
+            status = (
+                f"You have already exceeded this budget by {abs(remaining_action_points)} action point(s)."
+            )
+        return (
+            "[Toolcall Budget Compliance] "
+            f"You must finish this task within {int(compliance_toolcall_limit)} action points. "
+            f"Action points used so far: {int(action_points_used_so_far)}. "
             f"{status}"
         )
 
@@ -1099,7 +1332,7 @@ class CtxManagerWrapper:
             )
             if token_limit is None:
                 continue
-            note = f"You must finish your answer in {token_limit} tokens."
+            note = f"You must finish your answer in {token_limit} tokens. Include sufficient context in the answer section to improve accuracy."
             self._append_note_to_last_user_message(
                 [messages],
                 note=note,
@@ -1119,6 +1352,7 @@ class CtxManagerWrapper:
             turn_limit = self._get_eval_compliance_turn_limit_for_env(
                 env_id=int(env_id),
                 group_id=None if group_id is None else int(group_id),
+                current_turn=current_turn,
             )
             if turn_limit is None:
                 continue
@@ -1130,6 +1364,39 @@ class CtxManagerWrapper:
                 [messages],
                 note=note,
                 marker="[Turn Budget Compliance]",
+            )
+
+    def _inject_eval_compliance_toolcall_prompt(
+        self,
+        messages_list: List[List[Dict]],
+        env_ids: List[Any],
+        group_ids: Optional[List[Any]] = None,
+        action_points_used_so_far: Optional[List[Any]] = None,
+    ) -> None:
+        if group_ids is None:
+            group_ids = [None] * len(messages_list)
+        if action_points_used_so_far is None:
+            action_points_used_so_far = [0] * len(messages_list)
+        for idx, (messages, env_id, group_id) in enumerate(zip(messages_list, env_ids, group_ids)):
+            toolcall_limit = self._get_eval_compliance_toolcall_limit_for_env(
+                env_id=int(env_id),
+                group_id=None if group_id is None else int(group_id),
+            )
+            if toolcall_limit is None:
+                continue
+            used_so_far = (
+                int(action_points_used_so_far[idx])
+                if idx < len(action_points_used_so_far) and action_points_used_so_far[idx] is not None
+                else 0
+            )
+            note = self._build_eval_compliance_toolcall_note(
+                int(toolcall_limit),
+                int(used_so_far),
+            )
+            self._append_note_to_last_user_message(
+                [messages],
+                note=note,
+                marker="[Toolcall Budget Compliance]",
             )
 
     def _inject_token_estimation_prompt(
@@ -1320,6 +1587,9 @@ class CtxManagerWrapper:
         messages_list = self.reassemble_messages(messages_list)
         env_ids = self._to_list(lm_inputs.non_tensor_batch.get("env_ids"))
         group_ids = self._to_list(lm_inputs.non_tensor_batch.get("group_ids"))
+        action_points_used_so_far = self._to_list(
+            lm_inputs.non_tensor_batch.get("action_points_used_so_far")
+        )
         budget_turns = lm_inputs.non_tensor_batch.get("budget_turns")
         if budget_turns is not None:
             budget_turns = (
@@ -1344,6 +1614,13 @@ class CtxManagerWrapper:
             self._inject_eval_compliance_token_prompt(messages_list, env_ids, group_ids)
         if self._eval_compliance_turn_enabled():
             self._inject_eval_compliance_turn_prompt(messages_list, env_ids, group_ids)
+        if self._eval_compliance_toolcall_enabled():
+            self._inject_eval_compliance_toolcall_prompt(
+                messages_list,
+                env_ids,
+                group_ids,
+                action_points_used_so_far,
+            )
 
         self._inject_benchmark_turn_prompt(messages_list)
 

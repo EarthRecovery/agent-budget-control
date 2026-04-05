@@ -5,6 +5,7 @@ import os
 import asyncio
 import time
 
+import httpx
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from together import AsyncTogether
@@ -89,14 +90,25 @@ class OpenAIProvider(LLMProvider):
     """OpenAI API provider implementation"""
     provider_name = "openai"
     
-    def __init__(self, model_name: str = "gpt-4o", api_key: Optional[str] = None):
+    def __init__(
+        self,
+        model_name: str = "gpt-4o",
+        api_key: Optional[str] = None,
+        timeout: Optional[Union[float, httpx.Timeout]] = None,
+    ):
         self.model_name = model_name
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not provided and not found in environment variables")
 
         # Disable SDK-level retries so batch retry behavior is controlled in ConcurrentLLM.
-        self.client = AsyncOpenAI(api_key=self.api_key, max_retries=0)
+        client_kwargs = {
+            "api_key": self.api_key,
+            "max_retries": 0,
+        }
+        if timeout is not None:
+            client_kwargs["timeout"] = timeout
+        self.client = AsyncOpenAI(**client_kwargs)
 
     def _normalize_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         normalized = dict(kwargs)
@@ -138,14 +150,26 @@ class DeepSeekProvider(LLMProvider):
     """DeepSeek API provider implementation"""
     provider_name = "deepseek"
     
-    def __init__(self, model_name: str = "deepseek-reasoner", api_key: Optional[str] = None):
+    def __init__(
+        self,
+        model_name: str = "deepseek-reasoner",
+        api_key: Optional[str] = None,
+        timeout: Optional[Union[float, httpx.Timeout]] = None,
+    ):
         self.model_name = model_name
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
         if not self.api_key:
             raise ValueError("DeepSeek API key not provided and not found in environment variables")
 
         # Disable SDK-level retries so batch retry behavior is controlled in ConcurrentLLM.
-        self.client = AsyncOpenAI(api_key=self.api_key, base_url="https://api.deepseek.com", max_retries=0)
+        client_kwargs = {
+            "api_key": self.api_key,
+            "base_url": "https://api.deepseek.com",
+            "max_retries": 0,
+        }
+        if timeout is not None:
+            client_kwargs["timeout"] = timeout
+        self.client = AsyncOpenAI(**client_kwargs)
     
     async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
         if "o1-mini" in self.model_name:
@@ -242,7 +266,8 @@ class ConcurrentLLM:
     """Unified concurrent interface for multiple LLM providers"""
     
     def __init__(self, provider: Union[str, LLMProvider], model_name: Optional[str] = None, 
-                api_key: Optional[str] = None, max_concurrency: int = 4):
+                api_key: Optional[str] = None, max_concurrency: int = 4,
+                timeout: Optional[Union[float, httpx.Timeout]] = None):
         """
         Initialize the concurrent LLM client.
         
@@ -256,9 +281,11 @@ class ConcurrentLLM:
             self.provider = provider
         else:
             if provider.lower() == "openai":
-                self.provider = OpenAIProvider(model_name or "gpt-4o", api_key)
+                self.provider = OpenAIProvider(model_name or "gpt-4o", api_key, timeout=timeout)
             elif provider.lower() == "deepseek":
-                self.provider = DeepSeekProvider(model_name or "deepseek-reasoner", api_key)
+                self.provider = DeepSeekProvider(
+                    model_name or "deepseek-reasoner", api_key, timeout=timeout
+                )
             elif provider.lower() == "anthropic":
                 self.provider = AnthropicProvider(model_name or "claude-3-7-sonnet-20250219", api_key)
             elif provider.lower() == "together":

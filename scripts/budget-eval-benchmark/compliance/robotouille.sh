@@ -29,7 +29,7 @@ MAX_CONTEXT_WINDOW=${MAX_CONTEXT_WINDOW:--1} # -1 keeps full history, 1 keeps on
 MAX_ACTION_POINTS=${MAX_ACTION_POINTS:-30}
 API_CONNECT_TIMEOUT_SECONDS=${API_CONNECT_TIMEOUT_SECONDS:-10}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/budget-estimation-benchmark"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/robotouille-1-gpt5.2-Instant-eval-estimation-test"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/robotouille-compliance-toolcall-gpt5.2-Instant-1-test"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 
 mkdir -p "$OUTPUT_DIR" "$HYDRA_DIR"
@@ -39,7 +39,8 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   agent_proxy.enable_think=True \
   "agent_proxy.eval-estimation-single=False" \
   "agent_proxy.eval-estimation-multi=False" \
-  "agent_proxy.eval-estimation-toolcall=True" \
+  "agent_proxy.eval_compliance_toolcall=True" \
+  "agent_proxy.eval_compliance_toolcall_scope=[5,10,15,20,25]" \
   agent_proxy.context_window_mode=${CONTEXT_WINDOW_MODE} \
   agent_proxy.max_context_window=${MAX_CONTEXT_WINDOW} \
   agent_proxy.max_turn=${MAX_TURN} \

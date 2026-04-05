@@ -2,9 +2,9 @@
 set -euo pipefail
 
 eval "$(conda shell.bash hook)"
-conda activate ragen
+conda activate ragenv2
 
-PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/RAGEN-v2"}
+PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/agent-budget-control"}
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
@@ -12,8 +12,8 @@ export PYTHONPATH="$PWD:$PWD/verl"
 : "${OPENAI_API_KEY:?Please export OPENAI_API_KEY before running this benchmark.}"
 
 RUN_NAME=${RUN_NAME:-sokoban_api_eval_estimation}
-MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Thinking}
-VAL_GROUPS=${VAL_GROUPS:-512}
+MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Instant}
+VAL_GROUPS=${VAL_GROUPS:-1}
 VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-0}
 MAX_TURN=${MAX_TURN:-10}
 MAX_ACTIONS_PER_TURN=${MAX_ACTIONS_PER_TURN:-1}
@@ -22,7 +22,7 @@ MAX_TOKENS=${MAX_TOKENS:-4096}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-8192}
 MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-8192}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/budget-estimation-benchmark"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/sokoban-512-gpt5.2-Thinking"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/sokoban-compliance-turn-gpt5.2-Thinking-1-test"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 
 mkdir -p "$OUTPUT_DIR" "$HYDRA_DIR"
@@ -31,7 +31,9 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   model_config.model_name="${MODEL_NAME}" \
   agent_proxy.enable_think=True \
   "agent_proxy.eval-estimation-single=False" \
-  "agent_proxy.eval-estimation-multi=True" \
+  "agent_proxy.eval-estimation-multi=False" \
+  "agent_proxy.eval_compliance_turn=True" \
+  "agent_proxy.eval_compliance_turn_scope=[2,4,6,8,10]" \
   agent_proxy.max_turn=${MAX_TURN} \
   agent_proxy.max_actions_per_turn=${MAX_ACTIONS_PER_TURN} \
   es_manager.val.env_groups=${VAL_GROUPS} \

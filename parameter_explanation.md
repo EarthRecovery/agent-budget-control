@@ -397,3 +397,228 @@ rollout 结束后统计该 env 是否在对应上限内完成回答。
   每轮 context 提示和最终日志统计，不会替代 `agent_proxy.max_turn` 的真实停止逻辑。
 - **建议单独使用，不要和 `agent_proxy.eval_compliance_token` 同时开启**：否则需要额外定义
   token budget 与 turn budget 的联合展开规则。
+
+## `agent_proxy.eval_compliance_toolcall`
+**作用**：启用“toolcall / action-point budget compliance”评测模式。这个模式只适用于
+**Robotouille**。系统先读取 `agent_proxy.eval_compliance_toolcall_scope`，再把每个原始
+group / 题目复制成多份 env rollout，每份 env rollout 绑定一个固定的
+`budget_toolcall_num`（建议日志字段名使用 `compliance_toolcall_limit`），分别执行一整条
+multi-turn rollout。区别在于，这里评估的是“整条 rollout 最终累计消耗了多少 toolcall /
+action points，以及是否在 budget 内”，而不是每一轮单独估计。
+
+### 运行前校验
+
+- **与估计模式互斥**：`agent_proxy.eval_compliance_toolcall` 不能和
+  `agent_proxy.eval-estimation-single`、`agent_proxy.eval-estimation-multi`、
+  `agent_proxy.eval-estimation-toolcall` 同时开启；否则会直接报错。文件：
+  `agent-budget-control/ragen/wrapper/ctx_manager_wrapper.py`.
+- **与其他 compliance 模式互斥**：`eval_compliance_toolcall` 不能和
+  `eval_compliance_token`、`eval_compliance_turn` 同时开启；三者只能开一个。文件：
+  `agent-budget-control/ragen/llm_agent/eval_config.py`，
+  `agent-budget-control/ragen/wrapper/ctx_manager_wrapper.py`.
+- **必须提供 scope**：如果该参数为 `true`，则
+  `agent_proxy.eval_compliance_toolcall_scope` 不能为空；否则直接报错。文件：
+  `agent-budget-control/ragen/wrapper/ctx_manager_wrapper.py`，
+  `agent-budget-control/ragen/llm_agent/eval_config.py`.
+- **只允许在 Robotouille 上开启**：当前 active env 的 `env_type` 必须全部是
+  `robotouille`；如果混入其他环境，会直接报错。文件：
+  `agent-budget-control/ragen/llm_agent/eval_config.py`.
+- **必须同时开启 action budget**：对应的
+  `custom_envs.<Tag>.env_config.enable_action_budget` 必须是 `true`，否则直接报错。文件：
+  `agent-budget-control/ragen/llm_agent/eval_config.py`.
+- **必须有统一的 `max_action_points`**：所有 active Robotouille env 的
+  `max_action_points` 都必须存在，并且当前实现要求它们一致；否则直接报错。文件：
+  `agent-budget-control/ragen/llm_agent/eval_config.py`.
+
+### Rollout / Context 侧
+
+- **运行时会扩展 `group_size`，而不是覆盖 `max_turn`**：逻辑与 token / turn compliance
+  一致，`es_manager.train.group_size` 和 `es_manager.val.group_size` 会按
+  `len(agent_proxy.eval_compliance_toolcall_scope)` 扩大；`agent_proxy.max_turn` 保持原值不变。
+  文件：`agent-budget-control/ragen/llm_agent/eval_config.py`.
+- **同一个原始 group / 题目会被复制成多份 rollout**：每个复制出来的 env 绑定一个固定的
+  `budget_toolcall_num`，并针对这个 budget 独立完成一次完整 rollout。
+- **每个 env 绑定一个固定 toolcall budget，不是按 turn 轮流取 `scope[i]`**：scope 的作用仍然是
+  “展开多少份 budget rollout”，不是“单条 rollout 在第 1/2/3 轮轮流使用不同 budget”。
+- **每个 turn 都会动态注入 action-point budget 提示**：在最后一条 user message 中追加当前 env
+  的 toolcall budget 信息，至少会包含：
+  - 固定的 `compliance_toolcall_limit`；
+  - 当前已经累计用了多少 action points；
+  - 当前在这个 budget 下还剩多少 action points 可以用；若已经超出，也会明确提示超出多少。
+- **超 budget 后仍要继续在 context 中保留提醒**：一旦累计消耗超过当前 budget，后续每一轮的
+  context 仍会继续提示“已经超出多少 action points”，不会只提醒一次。
+- **这是 soft compliance，不是 hard early stop**：即使某个 env 已经超出 toolcall budget，
+  rollout 仍然继续跑到任务结束或 `agent_proxy.max_turn`。超 budget 只影响 prompt 提示和日志统计，
+  不应直接截断生成。
+- **生成前缀保持原生格式**：和 token / turn compliance 一样，toolcall compliance 本身不要求
+  模型输出 `<budget-thinking>`、`<remaining_action_points_estimation>` 等额外标签；回答前缀保持正常的
+  `<think>` / `<answer>` 逻辑。文件：
+  `agent-budget-control/ragen/llm_agent/agent_proxy.py`，
+  `agent-budget-control/ragen/llm_agent/ctx_manager.py`.
+- **不再把 `Max response length: ...` 写入 context**：当 compliance 模式开启时，
+  `ContextManager._build_format_prompt` 会把 `LENGTH_PROMPT` 置空，因此 context 中不会再出现
+  `Max response length: 1024 words (tokens).` 这类文案。文件：
+  `agent-budget-control/ragen/llm_agent/ctx_manager.py`.
+
+### 输出解析与日志
+
+- **日志文件名**：继续写入 `*_eval_compliance_dialogues.json`，但 env 级 `mode` 会区分成
+  `compliance_toolcall`。文件：`agent-budget-control/ragen/wrapper/ctx_manager_wrapper.py`.
+- **JSON 顶层仍是展开后的 env rollout 记录**：顶层记录数按
+  `env_groups * group_size * len(eval_compliance_toolcall_scope)` 计算。
+- **env 级字段至少包含**：
+  - `mode="compliance_toolcall"`；
+  - 完整的 `eval_compliance_toolcall_scope`；
+  - 当前 env 绑定的 `compliance_toolcall_limit`；
+  - `total_action_points_used` / `total_toolcalls_used`：该 rollout 最终实际累计消耗多少 action points；
+  - `within_toolcall_limit`：`total_action_points_used <= compliance_toolcall_limit`；
+  - `toolcall_limit_delta`：`total_action_points_used - compliance_toolcall_limit`，正数表示超了多少；
+  - `success_within_toolcall_limit`：任务成功且 `within_toolcall_limit=True`。
+- **turn 级字段至少包含**：
+  - `compliance_toolcall_limit`：当前 env 绑定的固定 toolcall budget；
+  - `action_points_used_before_turn`：进入本轮前累计已经用了多少 action points；
+  - `remaining_action_points_before_turn`：进入本轮前还剩多少 action points 可用；
+  - `actual_action_points`：本轮实际消耗多少 action points；
+  - `cumulative_action_points_used`：截至本轮结束累计消耗多少 action points；
+  - `remaining_action_points_after_turn`：本轮结束后预算还剩多少 action points；
+  - `within_toolcall_limit_so_far`：截至本轮结束累计消耗是否仍在 budget 内；
+  - `exceeded_toolcall_limit`：截至本轮结束是否已经超过 budget；
+  - `compliance_instruction`：实际注入到 prompt 的提醒文案。
+- **最终统计以完整 rollout 为准**：每个 env rollout 结束后，都要在 env 级记录里写清楚
+  “总共花了多少 action points”以及“是否在 budget 里面”。文件：
+  `agent-budget-control/ragen/wrapper/ctx_manager_wrapper.py`.
+
+### 结果解释上的注意事项
+
+- **`max_turn` 语义没变**：`eval_compliance_toolcall_scope` 决定的是“每个原始题目要复制多少份
+  toolcall-budget rollout”，不是 rollout 最多跑多少轮。
+- **超出 budget 不等于立即终止**：`within_toolcall_limit=False` 只表示最终 action-point
+  消耗超标；rollout 本身仍可能继续生成直到 env 正常结束或达到 `max_turn`。
+- **推荐优先看 `success_within_toolcall_limit`**：只看 `within_toolcall_limit=True` 只能说明
+  最终 action-point 用量没超；若任务没有完成，不能算一次有效的 budget-compliant 成功。
+
+## `agent_proxy.eval_compliance_toolcall_scope`
+**作用**：提供 toolcall compliance 模式下的“budget toolcall / action-point 列表”。这个列表不是给
+单个 rollout 按 turn 轮流使用，而是用来把每个原始 group / 题目展开成多份 env rollout，每份 env
+rollout 绑定其中一个固定的 `budget_toolcall_num`。
+
+### 参数含义
+
+- **类型**：列表，例如 `[]`、`[2, 4, 6]`。
+- **每个元素的含义**：第 `i` 个元素表示展开后的第 `i` 组 env 副本所绑定的 toolcall / action-point
+  上限。
+- **运行时会被规范化为非负整数**：逻辑与 `agent_proxy.eval_compliance_token_scope`、
+  `agent_proxy.eval_compliance_turn_scope` 相同，需要尝试把每个元素转成 `int`，并裁到 `>=0`；若无法
+  转成整数，会直接报错。文件：`agent-budget-control/ragen/llm_agent/eval_config.py`，
+  `agent-budget-control/ragen/wrapper/ctx_manager_wrapper.py`.
+- **建议 budget 范围尽量落在 `[1, max_action_points]` 内**：大于 env 的 action budget 虽然技术上可行，
+  但评测意义会变弱；`0` 也可以被解析，但会导致从第一轮开始就处于“已无可用 action points”的状态。
+
+### 例子
+
+- `agent_proxy.eval_compliance_toolcall_scope=[2,4,6]`
+  表示：
+  - 每个原始题目会复制出 3 份 env rollout；
+  - 这 3 份 rollout 分别绑定 2、4、6 这 3 个 toolcall / action-point budget；
+  - 每份 rollout 的所有 turn 都会持续注入 toolcall budget 提示，但提示内容会随着“当前已累计使用多少
+    action points”动态变化；
+  - 例如 budget=4 的那份 rollout：
+    - 若当前累计已用 1，则提示“需要在 4 个 action points 内完成，还剩 3 个可用”；
+    - 若当前累计已用 4，则提示“当前已没有剩余 action points，再调用就会超 budget”；
+    - 若当前累计已用 5，则提示“已经超出 budget 1 个 action point”；
+  - 如果原始配置是 `VAL_GROUPS=2`、原始 `group_size=1`，那么运行时会展开成
+    2 × 3 = 6 个 env rollout，JSON 顶层也应有 6 条 env 记录；
+  - 如果原始 `group_size=2`，那么每个 budget 会连续重复 2 份，因为同一个原始 group 里原本就有 2 个并行副本。
+
+### 与其他参数的关系
+
+- **只有在 `agent_proxy.eval_compliance_toolcall=true` 时才生效**。
+- **它会扩展 `group_size`，不会覆盖 `agent_proxy.max_turn`**。
+- **不会变成真实的硬停止条件**：它只控制每个 env rollout 绑定的目标 toolcall budget、每轮 context
+  提示和最终日志统计，不会替代 Robotouille 自己的 `enable_action_budget` / `max_action_points`
+  停止逻辑。
+- **建议单独使用，不要和 `agent_proxy.eval_compliance_token`、`agent_proxy.eval_compliance_turn`
+  同时开启**：否则需要额外定义多维 budget 的联合展开规则。
+
+
+## `agent_proxy.eval_compliance_turn` 补充：mutation 版 turn budget
+
+除了上面已经实现的 `agent_proxy.eval_compliance_turn_scope` 展开模式之外，
+`agent_proxy.eval_compliance_turn` 现在还支持另一种 **动态 turn budget** 写法：
+
+- `agent_proxy.eval_compliance_turn_mutation_turn`
+- `agent_proxy.eval_compliance_turn_budget_change`
+
+这两个参数必须一起提供，并且**不能**再同时设置 `agent_proxy.eval_compliance_turn_scope`。
+
+### 作用
+
+当开启 `agent_proxy.eval_compliance_turn=true`，并设置：
+
+- `agent_proxy.eval_compliance_turn_mutation_turn = M`
+- `agent_proxy.eval_compliance_turn_budget_change = [B_before, B_after]`
+
+系统会在不同 turn 使用不同的 turn budget：
+
+- 当 `current_turn <= M` 时，context 里要求模型“在 `B_before` turn 之前结束任务”；
+- 当 `current_turn > M` 时，context 里要求模型“在 `B_after` turn 之前结束任务”；
+- 每一轮都会继续写当前还距离 budget 差多少 turn，也就是：
+  `turn_budget_distance = current_budget_turn - current_turn`。
+
+### 例子
+
+- `agent_proxy.eval_compliance_turn_mutation_turn = 2`
+- `agent_proxy.eval_compliance_turn_budget_change = [9, 5]`
+
+表示：
+
+- 第 1、2 轮时，prompt 注入的 budget 是 `9`；
+- 从第 3 轮开始，prompt 注入的 budget 变成 `5`；
+- 所有 turn 都会写：
+  - `Budget turn: ...`
+  - `Current turn: ...`
+  - `turn_budget_distance`
+  - 以及当前是“还没到 budget / 正好是最后一个 budgeted turn / 已超出 budget”。
+
+### 与 scope 模式的区别
+
+- `eval_compliance_turn_scope=[1,2,3,...]`：是把同一个题目复制成多份 rollout，每份 rollout 绑定一个**固定** turn budget。
+- `eval_compliance_turn_mutation_turn + eval_compliance_turn_budget_change`：是不复制 rollout，而是在**同一条 rollout 内**，随着当前轮次变化动态切换 budget。
+
+### 运行前约束
+
+- `eval_compliance_turn_mutation_turn` 和 `eval_compliance_turn_budget_change` 必须同时设置；
+- `eval_compliance_turn_budget_change` 必须正好包含两个整数；
+- 不能和 `eval_compliance_turn_scope` 同时使用；
+- 若 mutation 模式启用，则不会再按 scope 扩大 `group_size`。
+
+### Context / Prompt 侧
+
+- `CtxManagerWrapper._inject_eval_compliance_turn_prompt` 会在每轮最后一条 user message 后追加 turn budget 提示；
+- `CtxManagerWrapper._build_eval_compliance_turn_note` 会根据当前 turn 自动选择 `B_before` 或 `B_after`；
+- 日志里每轮都会记录：
+  - `compliance_turn_limit`
+  - `current_turn`
+  - `turn_budget_distance`
+  - `within_turn_limit_so_far`
+  - `exceeded_turn_limit`
+  - `compliance_instruction`
+
+### rollout 结束后的判定
+
+- env 级 `compliance_turn_limit` 使用“最终完成时所在 turn 对应的动态 budget”；
+- `within_turn_limit = total_turns <= final_compliance_turn_limit`；
+- `turn_limit_delta = total_turns - final_compliance_turn_limit`；
+- `success_within_turn_limit = success and within_turn_limit`。
+
+## `agent_proxy.eval_compliance_turn_mutation_turn`
+
+- 示例：`2`
+- 含义：第 `1..2` 轮使用 `budget_change[0]`，第 `3` 轮开始使用 `budget_change[1]`。
+
+## `agent_proxy.eval_compliance_turn_budget_change`
+
+- 示例：`[9, 5]`
+- 含义：
+  - `9`：mutation turn 及之前的 budget；
+  - `5`：mutation turn 之后的 budget。

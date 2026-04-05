@@ -26,7 +26,7 @@ def prepare_hotpotqa(output_dir: str = "data/search", train_size: int = None, te
     os.makedirs(output_dir, exist_ok=True)
 
     print("Loading HotpotQA dataset (distractor split)...")
-    dataset = load_dataset("hotpotqa/hotpot_qa", "distractor", trust_remote_code=True)
+    dataset = load_dataset("hotpotqa/hotpot_qa", "distractor")
 
     # Process train split
     train_data = dataset["train"]

@@ -14,6 +14,7 @@ Architecture follows RAGEN's WebShop pattern:
 """
 
 import logging
+import os
 import re
 from typing import Any, Dict, Optional, Tuple
 
@@ -71,19 +72,30 @@ class SearchEnv(BaseLanguageBasedEnv, gym.Env):
         self.step_count = 0
         self.render_cache = None
 
+    def _resolve_data_path(self) -> str:
+        """Resolve env vars, user home, and relative paths for the dataset file."""
+        return os.path.abspath(os.path.expanduser(os.path.expandvars(self.config.train_path)))
+
     def _load_data(self):
         """Load HotpotQA data from parquet file."""
+        data_path = self._resolve_data_path()
         try:
+            if not os.path.exists(data_path):
+                raise FileNotFoundError(
+                    "Search dataset not found at "
+                    f"'{data_path}'. Run `python scripts/prepare_search_data.py --output_dir data/search` "
+                    "from the project root, or set `env_config.train_path` to an existing parquet file."
+                )
             df = datasets.load_dataset(
                 "parquet",
-                data_files=self.config.train_path,
+                data_files=data_path,
             )["train"]
             if self.config.max_instances and len(df) > self.config.max_instances:
                 df = df.select(range(self.config.max_instances))
-            logger.info(f"Loaded {len(df)} search questions from {self.config.train_path}")
+            logger.info(f"Loaded {len(df)} search questions from {data_path}")
             return df
         except Exception as e:
-            logger.error(f"Failed to load data from {self.config.train_path}: {e}")
+            logger.error(f"Failed to load data from {data_path}: {e}")
             raise
 
     def reset(self, seed: Optional[int] = None, mode: Optional[str] = None) -> str:

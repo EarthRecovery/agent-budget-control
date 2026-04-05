@@ -7,6 +7,8 @@ model_config:
   max_concurrency: 16
   api_batch_size: 0
   prompt_token_margin: 512
+  api_connect_timeout_seconds: null
+  api_request_timeout_seconds: null
 
 model_info:
   Qwen2.5-7B-Instruct:
@@ -138,6 +140,12 @@ agent_proxy:
   "eval-estimation-toolcall": False
   eval_compliance_token: False
   eval_compliance_token_scope: []
+  eval_compliance_turn: False
+  eval_compliance_turn_scope: []
+  eval_compliance_turn_mutation_turn: null
+  eval_compliance_turn_budget_change: []
+  eval_compliance_toolcall: False
+  eval_compliance_toolcall_scope: []
   token_estimation: False
   token_estimation_reward:
     estimate_bonus: 0.2 

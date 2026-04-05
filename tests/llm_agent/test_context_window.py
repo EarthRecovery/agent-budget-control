@@ -324,6 +324,50 @@ def test_eval_turn_compliance_omits_length_prompt_from_context(dummy_config):
     assert ctx._get_generation_prefix() == "<think>"
 
 
+def test_eval_toolcall_compliance_omits_length_prompt_from_context(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["eval_compliance_toolcall"] = True
+    cfg.agent_proxy["eval_compliance_toolcall_scope"] = [2, 4]
+    cfg.agent_proxy["enable_think"] = True
+    cfg.custom_envs = {
+        "Robotouille": {
+            "env_type": "robotouille",
+            "max_actions_per_traj": 10,
+            "env_config": {
+                "enable_action_budget": True,
+                "max_action_points": 6,
+            },
+        }
+    }
+    cfg.es_manager.train.env_configs.tags = ["Robotouille"]
+    cfg.es_manager.train.env_configs.n_groups = [1]
+    cfg.es_manager.train.group_size = 1
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+    ctx.env_config_lookup = {
+        0: {
+            "max_tokens": 128,
+            "env_tag": "Robotouille",
+            "env_type": "robotouille",
+            "max_action_points": 6,
+        }
+    }
+
+    format_prompt, length_prompt = ctx._build_format_prompt(0)
+    turn_content = ctx._build_turn_state_content(
+        {"state": "S1", "actions_left": 3},
+        turn_number=1,
+        env_id=0,
+    )
+
+    assert format_prompt == "<think> [Your thoughts] </think> <answer> [your answer] </answer>"
+    assert length_prompt == ""
+    assert "Max response length:" not in turn_content
+    assert "<budget-thinking>" not in turn_content
+    assert ctx._get_generation_prefix() == "<think>"
+
+
 def test_openai_reasoning_eval_estimation_keeps_explicit_reasoning_tags(dummy_config):
     cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
     cfg.agent_proxy["eval-estimation-single"] = True

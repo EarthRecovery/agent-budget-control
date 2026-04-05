@@ -17,7 +17,7 @@ from transformers import AutoTokenizer
 import hydra
 from ragen.utils import register_resolvers
 from ragen.env import REGISTERED_ENV_CONFIGS
-from ragen.llm_agent.eval_config import resolve_eval_estimation_mode
+from ragen.llm_agent.eval_config import resolve_eval_compliance_mode, resolve_eval_estimation_mode
 from tensordict import TensorDict
 
 from dataclasses import asdict
@@ -140,18 +140,7 @@ class ContextManager:
         return resolve_eval_estimation_mode(self.config)
 
     def _get_eval_compliance_mode(self) -> Optional[str]:
-        token_enabled = bool(self._agent_proxy_get("eval_compliance_token", False))
-        turn_enabled = bool(self._agent_proxy_get("eval_compliance_turn", False))
-        if token_enabled and turn_enabled:
-            raise ValueError(
-                "agent_proxy.eval_compliance_token and "
-                "agent_proxy.eval_compliance_turn cannot both be True."
-            )
-        if turn_enabled:
-            return "turn"
-        if token_enabled:
-            return "token"
-        return None
+        return resolve_eval_compliance_mode(self.config)
 
     def _eval_compliance_enabled(self) -> bool:
         return self._get_eval_compliance_mode() is not None
@@ -442,6 +431,7 @@ class ContextManager:
         budget_turns: Optional[List[Optional[int]]] = None,
         episode_ids: Optional[List[int]] = None,
         uid_list: Optional[List[Any]] = None,
+        action_points_used_so_far: Optional[List[int]] = None,
     ) -> DataProto:
         """Build DataProto with common structure for all modes."""
         llm_inputs = DataProto()
@@ -466,6 +456,8 @@ class ContextManager:
             non_tensor["episode_ids"] = np.array(episode_ids, dtype=int)
         if uid_list is not None:
             non_tensor["uid"] = np.array(uid_list, dtype=object)
+        if action_points_used_so_far is not None:
+            non_tensor["action_points_used_so_far"] = np.array(action_points_used_so_far, dtype=int)
 
         llm_inputs.non_tensor_batch = non_tensor
         return llm_inputs
@@ -1362,9 +1354,15 @@ class ContextManager:
 
         llm_input_texts = []
         messages_list = []
+        action_points_used_so_far = []
 
         for env_output in env_outputs:
             history = env_output['history']
+            used_so_far = sum(
+                max(0, int(turn.get("action_points_used", 0) or 0))
+                for turn in history
+                if isinstance(turn, dict) and "llm_response" in turn
+            )
 
             # Apply context window for non-full modes
             turn_offset = 0
@@ -1398,6 +1396,7 @@ class ContextManager:
 
             llm_input_texts.append(text)
             messages_list.append(messages)
+            action_points_used_so_far.append(int(used_so_far))
 
         # Tokenize
         input_ids, attention_mask, position_ids = self._tokenize_and_build_tensors(llm_input_texts)
@@ -1418,6 +1417,7 @@ class ContextManager:
                 [env_output.get("budget_turn") for env_output in env_outputs],
                 dtype=object,
             ),
+            "action_points_used_so_far": np.array(action_points_used_so_far, dtype=int),
         }
 
         return llm_inputs

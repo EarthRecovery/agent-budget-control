@@ -180,10 +180,16 @@ def make_turn_compliance_wrapper(
     start_group_index,
     turn_scope=None,
     base_group_size=1,
+    mutation_turn=None,
+    budget_change=None,
 ):
     if turn_scope is None:
         turn_scope = [1, 2, 3, 4, 5]
-    group_size = max(1, int(base_group_size)) * (len(turn_scope) if len(turn_scope) > 0 else 1)
+    mutation_enabled = mutation_turn is not None or bool(budget_change)
+    group_size_factor = len(turn_scope) if len(turn_scope) > 0 else 1
+    if mutation_enabled:
+        group_size_factor = 1
+    group_size = max(1, int(base_group_size)) * group_size_factor
     config = OmegaConf.create(
         {
             "agent_proxy": {
@@ -192,6 +198,8 @@ def make_turn_compliance_wrapper(
                 "eval-estimation-multi": False,
                 "eval_compliance_turn": True,
                 "eval_compliance_turn_scope": turn_scope,
+                "eval_compliance_turn_mutation_turn": mutation_turn,
+                "eval_compliance_turn_budget_change": budget_change or [],
             },
             "output": {
                 "dir": str(tmp_path),
@@ -202,6 +210,61 @@ def make_turn_compliance_wrapper(
                     "start_group_index": start_group_index,
                     "group_size": group_size,
                 }
+            },
+        }
+    )
+    return CtxManagerWrapper(config, DummyTokenizer())
+
+
+def make_toolcall_compliance_wrapper(
+    tmp_path,
+    *,
+    start_group_index,
+    toolcall_scope=None,
+    base_group_size=1,
+    enable_action_budget=True,
+    max_action_points=10,
+):
+    if toolcall_scope is None:
+        toolcall_scope = [2, 4, 6]
+    group_size = max(1, int(base_group_size)) * (len(toolcall_scope) if len(toolcall_scope) > 0 else 1)
+    config = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "enable_ctx_wrapper": True,
+                "eval-estimation-single": False,
+                "eval-estimation-multi": False,
+                "eval_compliance_toolcall": True,
+                "eval_compliance_toolcall_scope": toolcall_scope,
+                "enable_think": True,
+            },
+            "custom_envs": {
+                "Robotouille": {
+                    "env_type": "robotouille",
+                    "env_config": {
+                        "enable_action_budget": enable_action_budget,
+                        "max_action_points": max_action_points,
+                    },
+                }
+            },
+            "output": {
+                "dir": str(tmp_path),
+                "filename": "toolcall_compliance_api_eval.pkl",
+            },
+            "es_manager": {
+                "train": {
+                    "env_configs": {
+                        "tags": ["Robotouille"],
+                    },
+                    "group_size": group_size,
+                },
+                "val": {
+                    "start_group_index": start_group_index,
+                    "group_size": group_size,
+                    "env_configs": {
+                        "tags": ["Robotouille"],
+                    },
+                },
             },
         }
     )
@@ -569,6 +632,50 @@ def test_finalize_rollout_records_toolcall_action_point_fields(tmp_path):
     assert turns[1]["actual_action_points"] == 3
 
 
+def test_finalize_rollout_prefers_goal_predicate_ratio_in_json_reward(tmp_path):
+    wrapper = make_toolcall_wrapper(
+        tmp_path,
+        start_group_index=0,
+        max_action_points=6,
+    )
+    wrapper.begin_rollout()
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "Robotouille",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<answer>move</answer>",
+                        "llm_response": "<answer>move</answer>",
+                        "actions": ["move"],
+                        "reward": 1.0,
+                        "token_count": 16,
+                        "action_points_used": 1,
+                        "info": {
+                            "success": True,
+                            "goal_predicates_satisfied": 2,
+                            "goal_predicates_total": 5,
+                            "goal_predicate_ratio_reward": 0.4,
+                        },
+                    },
+                ],
+            }
+        ]
+    )
+
+    turn = wrapper._estimation_records[0]["turns"][0]
+    assert turn["reward"] == 0.4
+    assert turn["rollout_reward"] == 1.0
+    assert turn["reward_source"] == "goal_predicate_ratio"
+    assert turn["goal_predicates_satisfied"] == 2
+    assert turn["goal_predicates_total"] == 5
+    assert turn["goal_predicate_ratio_reward"] == 0.4
+
+
 def test_eval_compliance_log_uses_compliance_suffix(tmp_path):
     wrapper = make_compliance_wrapper(tmp_path, start_group_index=0)
 
@@ -800,9 +907,107 @@ def test_eval_turn_compliance_requires_non_empty_scope(tmp_path):
     try:
         make_turn_compliance_wrapper(tmp_path, start_group_index=0, turn_scope=[])
     except ValueError as exc:
-        assert "eval_compliance_turn_scope is empty" in str(exc)
+        assert "neither agent_proxy.eval_compliance_turn_scope nor the mutation-based turn compliance configuration is set" in str(exc)
     else:
         raise AssertionError("Expected ValueError for empty eval_compliance_turn_scope")
+
+
+def test_eval_turn_compliance_prompt_uses_mutated_budget_after_threshold(tmp_path):
+    wrapper = make_turn_compliance_wrapper(
+        tmp_path,
+        start_group_index=0,
+        turn_scope=[],
+        mutation_turn=2,
+        budget_change=[9, 5],
+    )
+    wrapper.turn_idx = 2
+    messages_list = [[{"role": "user", "content": "Question"}]]
+
+    wrapper._inject_eval_compliance_turn_prompt(messages_list, env_ids=[0], group_ids=[0])
+
+    prompt = messages_list[0][0]["content"]
+    assert "Budget turn: 5." in prompt
+    assert "Current turn: 3." in prompt
+    assert "Mutation turn: 2." in prompt
+    assert "Budget schedule: 9 before or at the mutation turn, 5 after the mutation turn." in prompt
+    assert "You are 2 turn(s) away from this budget." in prompt
+
+
+def test_eval_turn_compliance_finalize_rollout_records_mutation_budget_fields(tmp_path):
+    wrapper = make_turn_compliance_wrapper(
+        tmp_path,
+        start_group_index=0,
+        turn_scope=[],
+        mutation_turn=2,
+        budget_change=[9, 5],
+    )
+    wrapper.begin_rollout()
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "CoordSokoban",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<answer>Step1</answer>",
+                        "llm_response": "<answer>Step1</answer>",
+                        "actions": ["Right"],
+                        "reward": 0.0,
+                        "token_count": 20,
+                        "info": {"success": False},
+                    },
+                    {
+                        "state": "S2",
+                        "llm_raw_response": "<answer>Step2</answer>",
+                        "llm_response": "<answer>Step2</answer>",
+                        "actions": ["Down"],
+                        "reward": 0.0,
+                        "token_count": 20,
+                        "info": {"success": False},
+                    },
+                    {
+                        "state": "S3",
+                        "llm_raw_response": "<answer>Finish</answer>",
+                        "llm_response": "<answer>Finish</answer>",
+                        "actions": ["Left"],
+                        "reward": 1.0,
+                        "token_count": 20,
+                        "info": {"success": True},
+                    },
+                ],
+            },
+        ]
+    )
+
+    record = wrapper._estimation_records[0]
+    turns = record["turns"]
+    assert record["eval_compliance_turn_mutation_turn"] == 2
+    assert record["eval_compliance_turn_budget_change"] == [9, 5]
+    assert record["compliance_turn_limit"] == 5
+    assert record["within_turn_limit"] is True
+    assert turns[0]["compliance_turn_limit"] == 9
+    assert turns[0]["turn_budget_distance"] == 8
+    assert turns[1]["compliance_turn_limit"] == 9
+    assert turns[2]["compliance_turn_limit"] == 5
+    assert turns[2]["turn_budget_distance"] == 2
+
+
+def test_eval_turn_compliance_rejects_scope_and_mutation_combined(tmp_path):
+    try:
+        make_turn_compliance_wrapper(
+            tmp_path,
+            start_group_index=0,
+            turn_scope=[1, 2],
+            mutation_turn=2,
+            budget_change=[9, 5],
+        )
+    except ValueError as exc:
+        assert "cannot be used together" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for combining scope and mutation turn compliance")
 
 
 def test_toolcall_eval_estimation_requires_robotouille(tmp_path):
@@ -829,3 +1034,186 @@ def test_toolcall_eval_estimation_requires_action_budget_enabled(tmp_path):
         assert "enable_action_budget=True" in str(exc)
     else:
         raise AssertionError("Expected ValueError when action budget is disabled")
+
+
+def test_eval_toolcall_compliance_log_uses_compliance_suffix(tmp_path):
+    wrapper = make_toolcall_compliance_wrapper(tmp_path, start_group_index=0)
+
+    assert wrapper.get_estimation_log_path().endswith("_eval_compliance_dialogues.json")
+    assert wrapper.get_eval_log_key() == "eval_compliance_json_path"
+
+
+def test_eval_toolcall_compliance_prompt_uses_env_specific_limit_and_remaining_budget(tmp_path):
+    wrapper = make_toolcall_compliance_wrapper(tmp_path, start_group_index=0)
+    messages_list = [[{"role": "user", "content": "Question"}]]
+
+    wrapper._inject_eval_compliance_toolcall_prompt(
+        messages_list,
+        env_ids=[1],
+        group_ids=[0],
+        action_points_used_so_far=[1],
+    )
+
+    prompt = messages_list[0][0]["content"]
+    assert "[Toolcall Budget Compliance]" in prompt
+    assert "within 4 action points" in prompt
+    assert "Action points used so far: 1." in prompt
+    assert "You can still use 3 action point(s) within this budget." in prompt
+
+
+def test_eval_toolcall_compliance_limit_repeats_for_original_group_copies(tmp_path):
+    wrapper = make_toolcall_compliance_wrapper(
+        tmp_path,
+        start_group_index=0,
+        toolcall_scope=[2, 4, 6],
+        base_group_size=2,
+    )
+
+    assert wrapper._get_eval_compliance_toolcall_limit_for_env(env_id=0, group_id=0) == 2
+    assert wrapper._get_eval_compliance_toolcall_limit_for_env(env_id=1, group_id=0) == 2
+    assert wrapper._get_eval_compliance_toolcall_limit_for_env(env_id=2, group_id=0) == 4
+    assert wrapper._get_eval_compliance_toolcall_limit_for_env(env_id=3, group_id=0) == 4
+    assert wrapper._get_eval_compliance_toolcall_limit_for_env(env_id=4, group_id=0) == 6
+    assert wrapper._get_eval_compliance_toolcall_limit_for_env(env_id=5, group_id=0) == 6
+
+
+def test_eval_toolcall_compliance_finalize_rollout_records_budget_fields(tmp_path):
+    wrapper = make_toolcall_compliance_wrapper(
+        tmp_path,
+        start_group_index=0,
+        toolcall_scope=[2, 4, 6],
+        max_action_points=6,
+    )
+    wrapper.begin_rollout()
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "Robotouille",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<answer>move</answer>",
+                        "llm_response": "<answer>move</answer>",
+                        "actions": ["move"],
+                        "reward": 1.0,
+                        "token_count": 32,
+                        "action_points_used": 2,
+                        "info": {"success": True},
+                    },
+                ],
+            },
+            {
+                "env_id": 1,
+                "group_id": 0,
+                "uid": None,
+                "tag": "Robotouille",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<answer>step1</answer>",
+                        "llm_response": "<answer>step1</answer>",
+                        "actions": ["move"],
+                        "reward": 0.0,
+                        "token_count": 20,
+                        "action_points_used": 2,
+                        "info": {"success": False},
+                    },
+                    {
+                        "state": "S2",
+                        "llm_raw_response": "<answer>step2</answer>",
+                        "llm_response": "<answer>step2</answer>",
+                        "actions": ["cook"],
+                        "reward": 1.0,
+                        "token_count": 20,
+                        "action_points_used": 3,
+                        "info": {"success": True},
+                    },
+                ],
+            },
+        ]
+    )
+
+    record_0 = wrapper._estimation_records[0]
+    turns_0 = record_0["turns"]
+    assert record_0["mode"] == "compliance_toolcall"
+    assert record_0["eval_compliance_toolcall_scope"] == [2, 4, 6]
+    assert record_0["compliance_toolcall_limit"] == 2
+    assert record_0["total_action_points_used"] == 2
+    assert record_0["total_toolcalls_used"] == 2
+    assert record_0["within_toolcall_limit"] is True
+    assert record_0["toolcall_limit_delta"] == 0
+    assert record_0["success_within_toolcall_limit"] is True
+    assert turns_0[0]["compliance_toolcall_limit"] == 2
+    assert turns_0[0]["action_points_used_before_turn"] == 0
+    assert turns_0[0]["remaining_action_points_before_turn"] == 2
+    assert turns_0[0]["cumulative_action_points_used"] == 2
+    assert turns_0[0]["remaining_action_points_after_turn"] == 0
+    assert turns_0[0]["within_toolcall_limit_so_far"] is True
+    assert turns_0[0]["exceeded_toolcall_limit"] is False
+
+    record_1 = wrapper._estimation_records[1]
+    turns_1 = record_1["turns"]
+    assert record_1["compliance_toolcall_limit"] == 4
+    assert record_1["total_action_points_used"] == 5
+    assert record_1["within_toolcall_limit"] is False
+    assert record_1["toolcall_limit_delta"] == 1
+    assert record_1["success_within_toolcall_limit"] is False
+    assert turns_1[1]["action_points_used_before_turn"] == 2
+    assert turns_1[1]["remaining_action_points_before_turn"] == 2
+    assert turns_1[1]["cumulative_action_points_used"] == 5
+    assert turns_1[1]["remaining_action_points_after_turn"] == -1
+    assert turns_1[1]["within_toolcall_limit_so_far"] is False
+    assert turns_1[1]["exceeded_toolcall_limit"] is True
+    assert "Action points used so far: 2." in turns_1[1]["compliance_instruction"]
+    assert "You can still use 2 action point(s) within this budget." in turns_1[1]["compliance_instruction"]
+
+
+def test_eval_toolcall_compliance_requires_non_empty_scope(tmp_path):
+    try:
+        make_toolcall_compliance_wrapper(tmp_path, start_group_index=0, toolcall_scope=[])
+    except ValueError as exc:
+        assert "eval_compliance_toolcall_scope is empty" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for empty eval_compliance_toolcall_scope")
+
+
+def test_eval_toolcall_compliance_requires_robotouille(tmp_path):
+    try:
+        config = OmegaConf.create(
+            {
+                "agent_proxy": {
+                    "enable_ctx_wrapper": True,
+                    "eval_compliance_toolcall": True,
+                    "eval_compliance_toolcall_scope": [2],
+                },
+                "custom_envs": {
+                    "Sokoban": {
+                        "env_type": "sokoban",
+                        "env_config": {},
+                    }
+                },
+                "output": {
+                    "dir": str(tmp_path),
+                    "filename": "toolcall_compliance_api_eval.pkl",
+                },
+                "es_manager": {
+                    "train": {
+                        "env_configs": {"tags": ["Sokoban"]},
+                        "group_size": 1,
+                    },
+                    "val": {
+                        "start_group_index": 0,
+                        "group_size": 1,
+                        "env_configs": {"tags": ["Sokoban"]},
+                    },
+                },
+            }
+        )
+        CtxManagerWrapper(config, DummyTokenizer())
+    except ValueError as exc:
+        assert "eval_compliance_toolcall can only be enabled when all active environments are robotouille" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for non-robotouille toolcall compliance")

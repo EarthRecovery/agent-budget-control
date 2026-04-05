@@ -112,3 +112,48 @@ def test_expand_turn_compliance_group_size_multiplies_val_and_train_group_size_o
     assert config.es_manager.train.group_size == 6
     assert config.es_manager.val.group_size == 3
     assert config.agent_proxy.eval_compliance_group_size_expanded is True
+
+
+def test_expand_turn_compliance_group_size_does_not_expand_for_mutation_mode():
+    config = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "eval_compliance_turn": True,
+                "eval_compliance_turn_mutation_turn": 2,
+                "eval_compliance_turn_budget_change": [9, 5],
+            },
+            "es_manager": {
+                "train": {"group_size": 2},
+                "val": {"group_size": 1},
+            },
+        }
+    )
+
+    expand_compliance_group_size(config)
+    expand_compliance_group_size(config)
+
+    assert config.es_manager.train.group_size == 2
+    assert config.es_manager.val.group_size == 1
+    assert config.agent_proxy.eval_compliance_group_size_expanded is True
+
+
+def test_expand_toolcall_compliance_group_size_multiplies_val_and_train_group_size_once():
+    config = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "eval_compliance_toolcall": True,
+                "eval_compliance_toolcall_scope": [2, 4, 6],
+            },
+            "es_manager": {
+                "train": {"group_size": 2},
+                "val": {"group_size": 1},
+            },
+        }
+    )
+
+    expand_compliance_group_size(config)
+    expand_compliance_group_size(config)
+
+    assert config.es_manager.train.group_size == 6
+    assert config.es_manager.val.group_size == 3
+    assert config.agent_proxy.eval_compliance_group_size_expanded is True

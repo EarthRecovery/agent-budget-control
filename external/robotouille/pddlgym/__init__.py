@@ -6,11 +6,37 @@ from . import spaces
 
 import matplotlib
 # matplotlib.use("Agg")
-from pddlgym.rendering import *
 from gym.envs.registration import register
 import gym
 
 import os
+
+_RENDERING_IMPORT_ERROR = None
+try:
+    from pddlgym.rendering import *
+except ModuleNotFoundError as exc:
+    _RENDERING_IMPORT_ERROR = exc
+
+    def _missing_render(*args, **kwargs):
+        raise ModuleNotFoundError(
+            "pddlgym rendering dependencies are not installed. "
+            "Install optional rendering packages to use image-based rendering."
+        ) from _RENDERING_IMPORT_ERROR
+
+    rearrangement_render = _missing_render
+    sokoban_render = _missing_render
+    minecraft_render = _missing_render
+    hanoi_render = _missing_render
+    blocks_render = _missing_render
+    exploding_blocks_render = _missing_render
+    doors_render = _missing_render
+    tsp_render = _missing_render
+    slidetile_render = _missing_render
+    tireworld_render = _missing_render
+    snake_render = _missing_render
+    hiking_render = _missing_render
+    maze_render = _missing_render
+    navigation_render = _missing_render
 
 # Save users from having to separately import gym
 def make(*args, **kwargs):

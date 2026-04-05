@@ -68,6 +68,12 @@ agent_proxy:
   "eval-estimation-toolcall": False
   eval_compliance_token: False
   eval_compliance_token_scope: []
+  eval_compliance_turn: False
+  eval_compliance_turn_scope: []
+  eval_compliance_turn_mutation_turn: null
+  eval_compliance_turn_budget_change: []
+  eval_compliance_toolcall: False
+  eval_compliance_toolcall_scope: []
   test_generate: False
   test_string_output: "<answer></answer>"
   lm_inputs_record_path: null

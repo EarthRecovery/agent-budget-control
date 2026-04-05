@@ -149,6 +149,12 @@ agent_proxy:
   "eval-estimation-toolcall": False
   eval_compliance_token: False
   eval_compliance_token_scope: []
+  eval_compliance_turn: False
+  eval_compliance_turn_scope: []
+  eval_compliance_turn_mutation_turn: null
+  eval_compliance_turn_budget_change: []
+  eval_compliance_toolcall: False
+  eval_compliance_toolcall_scope: []
   token_estimation: False
   token_estimation_reward:
     estimate_bonus: 0.2
