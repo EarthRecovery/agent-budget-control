@@ -1,0 +1,41 @@
+defaults:
+  - base
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+model_config:
+  model_name: scripted_openhands
+  max_concurrency: 1
+
+model_info:
+  scripted_openhands:
+    provider_name: scripted
+    model_name: scripted_openhands
+    generation_kwargs:
+      scripted_action: RUN_OPENHANDS_TURN
+
+agent_proxy:
+  context_window_mode: single_turn
+  max_context_window: 1
+  max_turn: ${custom_envs.OpenHandsSWEBenchVerified.env_config.max_steps}
+  action_sep: "||"
+  max_actions_per_turn: 1
+  enable_think: false
+
+es_manager:
+  val:
+    env_groups: 1
+    group_size: 1
+    env_configs:
+      tags: ["OpenHandsSWEBenchVerified"]
+      n_groups: [1]
+
+output:
+  dir: results/eval
+  filename: openhands_val_rollouts.pkl
+  append_timestamp: true
+  keep_batch_keys: null
+  keep_non_tensor_keys: null
+  keep_meta_info: true

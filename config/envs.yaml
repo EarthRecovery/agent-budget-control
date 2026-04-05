@@ -371,3 +371,38 @@ custom_envs:
       scramble_depth: 1
       max_steps: 20
       render_mode: "text"
+
+  OpenHandsSWEBenchVerified:
+    env_type: openhands_swebench_verified
+    max_actions_per_traj: ${.env_config.max_steps}
+    # This instruction is only part of RAGEN's outer orchestration prompt path.
+    # In scripted mode there is no outer model call, so this is effectively ignored.
+    # OpenHands remains the only reasoning agent.
+    env_instruction: ""
+    max_tokens: 64
+    parallel_friendly: false
+    max_workers: 1
+    env_config:
+      benchmarks_root: ../benchmarks
+      llm_config_path: ../benchmarks/.llm_config/example.json
+      dataset: princeton-nlp/SWE-bench_Verified
+      split: test
+      max_instances: 500
+      workspace_type: docker
+      max_steps: 100
+      conversation_timeout_sec: 3600
+      max_iterations_per_run: 1
+      tool_preset: default
+      agent_type: default
+      enable_delegation: false
+      enable_condenser: true
+      condenser_max_size: 240
+      condenser_keep_first: 2
+      turn_user_prompt_template: "\nCurrent state summary: {state_summary}.\nLast tool status: {last_tool_status}. Last error: {last_error}.\n\nBudget question: Given the current progress and remaining work, how many additional turns do you estimate are still required to finish?\nTurns completed so far: {turn_index} / Max allowed turns: {max_steps}.\n\n{answer_format}"
+      turn_user_prompt_override: ""
+      answer_format: "For budget estimation, answer exactly in the format: <budget-thinking> [Your turn-budget reasoning for the remaining work] </budget-thinking>\n<turn_estimation> [Your estimated additional turns needed to complete the task] </turn_estimation>\nContinue with concrete actions in OpenHands. If you believe the task is solved, provide a concise completion summary. <completion-summary> [Your concise completion summary] </completion-summary> ."
+      turn_user_prompt_override_mode: prepend
+      trajectory_output_dir: results/openhands_eval
+      save_trajectory_json: true
+      save_full_payload_json: true
+      save_turn_json: true

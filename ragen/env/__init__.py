@@ -69,3 +69,11 @@ try:
     REGISTERED_ENV_CONFIGS['search'] = SearchEnvConfig
 except ImportError:
     pass
+
+try:
+    from .openhands.env import OpenHandsSWEBenchVerifiedEnv
+    from .openhands.config import OpenHandsSWEBenchVerifiedEnvConfig
+    REGISTERED_ENVS['openhands_swebench_verified'] = OpenHandsSWEBenchVerifiedEnv
+    REGISTERED_ENV_CONFIGS['openhands_swebench_verified'] = OpenHandsSWEBenchVerifiedEnvConfig
+except ImportError:
+    pass

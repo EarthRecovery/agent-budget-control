@@ -143,17 +143,33 @@ class ApiCallingWrapperWg:
         self.config = config
         self.tokenizer = tokenizer
         model_info = config.model_info[config.model_config.model_name]
+        self.provider_name = str(model_info.provider_name).lower()
         self.llm_kwargs = model_info.generation_kwargs
-        
-        
-        api_key = OmegaConf.select(model_info, "api_key", default=None)
-        self.llm = ConcurrentLLM(
-			provider=model_info.provider_name,
-            model_name=model_info.model_name,
-            api_key=api_key,
-            max_concurrency=config.model_config.max_concurrency
-        )
-        print(f"API-based LLM ({model_info.provider_name} - {model_info.model_name}) initialized")
+
+        self.scripted_action = None
+        self.scripted_response = None
+        self.llm = None
+
+        if self.provider_name == "scripted":
+            self.scripted_action = str(
+                OmegaConf.select(self.llm_kwargs, "scripted_action", default="RUN_OPENHANDS_TURN")
+            )
+            if bool(getattr(config.agent_proxy, "enable_think", True)):
+                # get_env_inputs prepends "<think>", so we close think and emit a single control action.
+                self.scripted_response = f"scripted turn control</think><answer>{self.scripted_action}</answer>"
+            else:
+                # get_env_inputs prepends "<answer>" in no-think mode.
+                self.scripted_response = f"{self.scripted_action}</answer>"
+            print(f"Scripted actor initialized with action: {self.scripted_action}")
+        else:
+            api_key = OmegaConf.select(model_info, "api_key", default=None)
+            self.llm = ConcurrentLLM(
+                provider=model_info.provider_name,
+                model_name=model_info.model_name,
+                api_key=api_key,
+                max_concurrency=config.model_config.max_concurrency
+            )
+            print(f"API-based LLM ({model_info.provider_name} - {model_info.model_name}) initialized")
 
     def generate_sequences(self, lm_inputs: DataProto) -> DataProto:
         """
@@ -165,15 +181,17 @@ class ApiCallingWrapperWg:
             return lm_inputs
 
         messages_list = lm_inputs.non_tensor_batch["messages_list"].tolist()
-        results, failed_messages = self.llm.run_batch(
-            messages_list=messages_list, **self.llm_kwargs
-        )
-        assert (
-            not failed_messages
-        ), f"Failed to generate responses for the following messages: {failed_messages}"
+        if self.provider_name == "scripted":
+            texts = [self.scripted_response for _ in messages_list]
+        else:
+            results, failed_messages = self.llm.run_batch(
+                messages_list=messages_list, **self.llm_kwargs
+            )
+            assert (
+                not failed_messages
+            ), f"Failed to generate responses for the following messages: {failed_messages}"
+            texts = [result["response"] for result in results]
 
-        texts = [result["response"] for result in results]
-        print(f"[DEBUG] texts: {texts}")
         lm_outputs = DataProto()
         lm_outputs.non_tensor_batch = {
             "response_texts": texts,
