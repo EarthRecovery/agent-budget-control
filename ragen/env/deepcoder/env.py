@@ -14,7 +14,7 @@ from .config import DeepCoderEnvConfig
 from .utils import prepare_deepcoder_data, run_deepcoder_sandbox
 
 
-_DATASET_CACHE: Dict[Tuple[Optional[str], Optional[str]], Any] = {}
+_DATASET_CACHE: Dict[Tuple[Optional[str], Optional[str], Tuple[str, ...]], Any] = {}
 
 
 class DeepCoderEnv(BaseLanguageBasedEnv):
@@ -35,7 +35,8 @@ class DeepCoderEnv(BaseLanguageBasedEnv):
 
     def _load_data(self) -> None:
         dataset_path = self.config.dataset_path
-        cache_key = (dataset_path, self.config.cache_dir)
+        requested_splits = self._get_requested_splits()
+        cache_key = (dataset_path, self.config.cache_dir, requested_splits)
         cached_dataset = _DATASET_CACHE.get(cache_key)
         if cached_dataset is not None:
             self.dataset = cached_dataset
@@ -48,8 +49,12 @@ class DeepCoderEnv(BaseLanguageBasedEnv):
 
         dataset_bundle = None
         try:
-            train_dataset, test_dataset = prepare_deepcoder_data()
-            dataset_bundle = {"train": train_dataset, "test": test_dataset}
+            train_dataset, test_dataset = prepare_deepcoder_data(splits=requested_splits)
+            dataset_bundle = {}
+            if train_dataset is not None:
+                dataset_bundle["train"] = train_dataset
+            if test_dataset is not None:
+                dataset_bundle["test"] = test_dataset
         except Exception:
             dataset_bundle = None
 
@@ -59,6 +64,12 @@ class DeepCoderEnv(BaseLanguageBasedEnv):
         else:
             self.dataset = None
 
+    def _get_requested_splits(self) -> Tuple[str, ...]:
+        split = str(self.config.split or "").strip().lower()
+        if split in {"train", "test"}:
+            return (split,)
+        return ("train", "test")
+
     def _sample_problem(self, seed: Optional[int] = None) -> Tuple[str, str]:
         if self.dataset is None:
             prompt = "Write a function add(a, b) that returns a + b."
@@ -66,6 +77,8 @@ class DeepCoderEnv(BaseLanguageBasedEnv):
             return prompt, solution
 
         split = self.config.split or next(iter(self.dataset.keys()))
+        if split not in self.dataset:
+            split = next(iter(self.dataset.keys()))
         dataset_split = self.dataset[split]
         index = random.randint(0, len(dataset_split) - 1)
         item = dataset_split[index]

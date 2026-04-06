@@ -1,3 +1,5 @@
+import asyncio
+
 from ragen.llm_agent import base_llm
 from ragen.llm_agent.base_llm import ConcurrentLLM, LLMProvider, LLMResponse
 
@@ -14,6 +16,25 @@ class FakeProvider(LLMProvider):
         if isinstance(result, Exception):
             raise result
         return result
+
+
+class FakeAPIError(RuntimeError):
+    def __init__(
+        self,
+        message,
+        *,
+        status_code=None,
+        request_id=None,
+        headers=None,
+        error_type=None,
+        error_code=None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.request_id = request_id
+        self.response = type("Response", (), {"headers": headers or {}})()
+        self.type = error_type
+        self.code = error_code
 
 
 def test_run_batch_records_usage_and_attempts():
@@ -45,7 +66,10 @@ def test_run_batch_records_usage_and_attempts():
 
 
 def test_run_batch_preserves_retry_attempt_history(monkeypatch):
-    monkeypatch.setattr(base_llm.time, "sleep", lambda *_args, **_kwargs: None)
+    async def fake_sleep(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(base_llm.asyncio, "sleep", fake_sleep)
     provider = FakeProvider(
         [
             RuntimeError("temporary failure"),
@@ -72,3 +96,66 @@ def test_run_batch_preserves_retry_attempt_history(monkeypatch):
     assert results[0]["attempts"][0]["success"] is False
     assert results[0]["attempts"][1]["success"] is True
     assert results[0]["attempts"][1]["total_tokens"] == 27
+
+
+def test_run_batch_uses_retry_after_header_and_records_exception_class(monkeypatch):
+    sleep_calls = []
+
+    async def fake_sleep(delay, *_args, **_kwargs):
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(base_llm.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(base_llm.random, "uniform", lambda *_args, **_kwargs: 0.0)
+    provider = FakeProvider(
+        [
+            FakeAPIError(
+                "rate limited",
+                status_code=429,
+                request_id="req_rate_limit",
+                headers={"retry-after": "7"},
+                error_type="rate_limit_error",
+                error_code="rate_limit_exceeded",
+            ),
+            LLMResponse(
+                content="ok",
+                model_name="fake-model",
+                provider_name="fake",
+                usage={
+                    "input_tokens": 8,
+                    "output_tokens": 3,
+                    "total_tokens": 11,
+                },
+                request_id="req_ok_after_retry",
+            ),
+        ]
+    )
+    llm = ConcurrentLLM(provider=provider, max_concurrency=1)
+
+    results, unresolved = llm.run_batch([[{"role": "user", "content": "hello"}]], max_retries=2)
+
+    assert unresolved == []
+    assert sleep_calls == [7.0]
+    assert results[0]["success"] is True
+    assert results[0]["attempts"][0]["exception_class"] == "FakeAPIError"
+    assert results[0]["attempts"][0]["status_code"] == 429
+    assert results[0]["attempts"][0]["request_id"] == "req_rate_limit"
+
+
+def test_openai_provider_rebuilds_async_client_when_event_loop_changes(monkeypatch):
+    created_clients = []
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            created_clients.append(kwargs)
+
+    monkeypatch.setattr(base_llm, "AsyncOpenAI", FakeAsyncOpenAI)
+    provider = base_llm.OpenAIProvider(model_name="gpt-4o", api_key="test-key")
+
+    async def get_client_identity():
+        return id(provider._get_client())
+
+    first_client = asyncio.run(get_client_identity())
+    second_client = asyncio.run(get_client_identity())
+
+    assert len(created_clients) == 2
+    assert first_client != second_client

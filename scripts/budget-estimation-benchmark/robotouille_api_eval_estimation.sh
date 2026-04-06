@@ -17,7 +17,7 @@ VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-0} # 0-based: 128 means start fro
 VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-0}
 ENV_NAME=${ENV_NAME:-synchronous/5_double_cheeseburger}
 MAX_TURN=${MAX_TURN:-30}
-MAX_ACTIONS_PER_TURN=${MAX_ACTIONS_PER_TURN:-1}
+MAX_ACTIONS_PER_TURN=${MAX_ACTIONS_PER_TURN:-5}
 MAX_ACTIONS_PER_TRAJ=${MAX_ACTIONS_PER_TRAJ:-30}
 ENV_MAX_STEPS=${ENV_MAX_STEPS:-100}
 MAX_TOKENS=${MAX_TOKENS:-768}
@@ -52,7 +52,7 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   es_manager.val.rollout_chunk_size=${VAL_ROLLOUT_CHUNK_SIZE} \
   "es_manager.val.env_configs.tags=[Robotouille]" \
   "es_manager.val.env_configs.n_groups=[${VAL_GROUPS}]" \
-  "custom_envs.Robotouille.env_instruction='You are controlling a kitchen robot. Choose exactly one action from the provided Valid Actions list. Think about the next state change, then inside <answer> output the exact action string only. Do not output multiple actions or any explanation inside <answer>.'" \
+  "custom_envs.Robotouille.env_instruction='You are controlling a kitchen robot. Choose between 1 and ${MAX_ACTIONS_PER_TURN} actions from the provided Valid Actions list for this turn. Think about the next state changes, then inside <answer> output only the exact action string or strings. If you choose multiple actions, separate them with ||, for example: action1 || action2. Do not output more than ${MAX_ACTIONS_PER_TURN} actions or any explanation inside <answer>.'" \
   ++custom_envs.Robotouille.env_config.env_name="${ENV_NAME}" \
   ++custom_envs.Robotouille.env_config.max_steps=${ENV_MAX_STEPS} \
   ++custom_envs.Robotouille.env_config.enable_action_budget=True \

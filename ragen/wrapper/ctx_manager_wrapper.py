@@ -185,6 +185,23 @@ class CtxManagerWrapper:
     def _eval_logging_enabled(self) -> bool:
         return self._get_active_eval_log_mode() is not None
 
+    def _output_filename_configured(self) -> bool:
+        output_cfg = getattr(self.config, "output", None)
+        if output_cfg is None:
+            return False
+        return bool(getattr(output_cfg, "filename", None))
+
+    def _dialogue_logging_enabled(self) -> bool:
+        return self._eval_logging_enabled() or self._output_filename_configured()
+
+    def _get_dialogue_log_mode(self) -> Optional[str]:
+        active_mode = self._get_active_eval_log_mode()
+        if active_mode is not None:
+            return active_mode
+        if self._output_filename_configured():
+            return "dialogue"
+        return None
+
     def _resolve_log_dir(self) -> str:
         trainer_cfg = getattr(self.config, "trainer", None)
         if trainer_cfg is not None and getattr(trainer_cfg, "local_log_dir", None):
@@ -214,7 +231,7 @@ class CtxManagerWrapper:
         return os.path.join(log_dir, f"{self._resolve_run_name()}.log")
 
     def _init_estimation_log_path(self) -> Optional[str]:
-        if not self._eval_logging_enabled():
+        if not self._dialogue_logging_enabled():
             return None
         log_dir = self._resolve_log_dir()
         os.makedirs(log_dir, exist_ok=True)
@@ -363,7 +380,7 @@ class CtxManagerWrapper:
         self._estimation_records = {}
 
     def finalize_rollout(self, rollout_states: List[Dict[str, Any]]) -> None:
-        if not self._eval_logging_enabled():
+        if not self._dialogue_logging_enabled():
             return
 
         eval_mode = self._get_eval_estimation_mode()
@@ -430,10 +447,14 @@ class CtxManagerWrapper:
                 self._resolve_actual_action_points_used(turn)
                 for turn in reward_turns
             ]
+            reward_turn_toolcalls = [
+                self._resolve_toolcalls_used(turn)
+                for turn in reward_turns
+            ]
             env_record["total_turns"] = len(reward_turns)
             total_action_points_used = int(sum(reward_turn_action_points))
             env_record["total_action_points_used"] = total_action_points_used
-            env_record["total_toolcalls_used"] = total_action_points_used
+            env_record["total_toolcalls_used"] = int(sum(reward_turn_toolcalls))
             if history:
                 env_record["initial_state"] = history[0].get("state")
                 env_record["final_state"] = history[-1].get("state")
@@ -459,12 +480,34 @@ class CtxManagerWrapper:
                     )
                 actual_token = max(0, int(turn.get("token_count", 0) or 0))
                 actual_action_points = reward_turn_action_points[turn_idx - 1]
+                toolcalls_used = reward_turn_toolcalls[turn_idx - 1]
+                action_points_used_before_turn = int(sum(reward_turn_action_points[: turn_idx - 1]))
+                cumulative_action_points_used = int(sum(reward_turn_action_points[:turn_idx]))
+                budget_remaining_before_turn = (
+                    None
+                    if toolcall_cap is None
+                    else int(toolcall_cap) - action_points_used_before_turn
+                )
+                budget_remaining_after_turn = (
+                    None
+                    if toolcall_cap is None
+                    else int(toolcall_cap) - cumulative_action_points_used
+                )
+                actual_remaining_action_points_to_finish = (
+                    self._clip_action_point_value(
+                        sum(reward_turn_action_points[turn_idx - 1:])
+                    )
+                    or 0
+                )
                 rollout_reward = turn.get("reward")
                 goal_ratio_reward = turn_info.get("goal_predicate_ratio_reward")
 
                 turn_record["raw_response"] = llm_raw_response
                 turn_record["parsed_response"] = "" if generation_error else turn.get("llm_response")
-                turn_record["actions"] = list(turn.get("actions", []) or [])
+                turn_actions = list(turn.get("actions", []) or [])
+                turn_record["actions"] = turn_actions
+                turn_record["action_names"] = turn_actions
+                turn_record["toolcalls_used"] = toolcalls_used
                 turn_record["reward"] = (
                     float(goal_ratio_reward)
                     if goal_ratio_reward is not None
@@ -513,16 +556,23 @@ class CtxManagerWrapper:
                     turn_record["estimate_remaining_action_points"] = (
                         self._extract_remaining_action_points_estimate(llm_raw_response)
                     )
+                    turn_record["estimate_remaining_action_points_to_finish"] = (
+                        turn_record["estimate_remaining_action_points"]
+                    )
                     turn_record["actual_remaining_action_points"] = (
-                        self._clip_action_point_value(
-                            sum(reward_turn_action_points[turn_idx - 1:])
-                        )
-                        or 0
+                        actual_remaining_action_points_to_finish
+                    )
+                    turn_record["actual_remaining_action_points_to_finish"] = (
+                        actual_remaining_action_points_to_finish
                     )
                     turn_record["estimate_action_points"] = (
                         self._extract_action_points_estimate(llm_raw_response)
                     )
                     turn_record["actual_action_points"] = actual_action_points
+                    turn_record["action_points_used_before_turn"] = action_points_used_before_turn
+                    turn_record["cumulative_action_points_used"] = cumulative_action_points_used
+                    turn_record["budget_remaining_before_turn"] = budget_remaining_before_turn
+                    turn_record["budget_remaining_after_turn"] = budget_remaining_after_turn
 
                 if self._eval_compliance_token_enabled():
                     compliance_token_limit = (
@@ -588,8 +638,6 @@ class CtxManagerWrapper:
                         if turn_record.get("compliance_toolcall_limit") is not None
                         else env_record.get("compliance_toolcall_limit")
                     )
-                    action_points_used_before_turn = int(sum(reward_turn_action_points[: turn_idx - 1]))
-                    cumulative_action_points_used = int(sum(reward_turn_action_points[:turn_idx]))
                     remaining_before_turn = (
                         None
                         if compliance_toolcall_limit is None
@@ -735,7 +783,7 @@ class CtxManagerWrapper:
                 "env_id": env_id,
                 "group_id": int(group_id) if group_id is not None else None,
                 "uid": uid,
-                "mode": self._get_active_eval_log_mode(),
+                "mode": self._get_dialogue_log_mode(),
                 "turns": [],
             }
         record = self._estimation_records[env_id]
@@ -772,7 +820,7 @@ class CtxManagerWrapper:
             ]
         if eval_mode == "toolcall":
             return [
-                "How many action points do you expect are still needed to finish, including this turn?",
+                "How many additional action points do you expect are still needed to finish from this turn onward?",
                 "How many action points do you expect to use in this turn?",
             ]
         if self._eval_compliance_enabled():
@@ -875,6 +923,14 @@ class CtxManagerWrapper:
         except (TypeError, ValueError):
             return 0
 
+    def _resolve_toolcalls_used(self, turn: Dict[str, Any]) -> int:
+        actions = turn.get("actions")
+        if isinstance(actions, (list, tuple)):
+            return len(actions)
+        if actions is None:
+            return 0
+        return 1 if str(actions).strip() else 0
+
     def _record_estimation_inputs(
         self,
         non_tensor_batch: Dict[str, Any],
@@ -882,7 +938,7 @@ class CtxManagerWrapper:
         texts: List[str],
         generation_suffix: str,
     ) -> None:
-        if not self._eval_logging_enabled():
+        if not self._dialogue_logging_enabled():
             return
 
         env_ids = self._to_list(non_tensor_batch.get("env_ids"))
@@ -946,7 +1002,7 @@ class CtxManagerWrapper:
             if compliance_token_limit is not None:
                 turn_record["compliance_token_limit"] = compliance_token_limit
                 turn_record["compliance_instruction"] = (
-                    f"You must complete your answer within {compliance_token_limit} tokens. Please allocate your reasoning tokens carefully to improve the precision of your response."
+                    f"You must complete your answer within {compliance_token_limit} tokens. You must write something in think part. Please allocate your reasoning tokens carefully to improve the precision of your response."
                 )
             if compliance_turn_limit is not None:
                 turn_record["compliance_turn_limit"] = compliance_turn_limit
@@ -1087,7 +1143,7 @@ class CtxManagerWrapper:
         return self._extract_tagged_int(text, "turn_estimation")
 
     def _record_estimation_outputs(self, lm_outputs) -> None:
-        if not self._eval_logging_enabled():
+        if not self._dialogue_logging_enabled():
             return
         if getattr(lm_outputs, "non_tensor_batch", None) is None:
             return
@@ -1155,10 +1211,14 @@ class CtxManagerWrapper:
                 turn_record["estimate_action_points"] = (
                     None if response_error is not None else self._extract_action_points_estimate(full_response)
                 )
-                turn_record["estimate_remaining_action_points"] = (
+                estimate_remaining_action_points = (
                     None
                     if response_error is not None
                     else self._extract_remaining_action_points_estimate(full_response)
+                )
+                turn_record["estimate_remaining_action_points"] = estimate_remaining_action_points
+                turn_record["estimate_remaining_action_points_to_finish"] = (
+                    estimate_remaining_action_points
                 )
 
     def _inject_budget_prompt(
@@ -1248,7 +1308,9 @@ class CtxManagerWrapper:
             )
         note = (
             "Before your final answer, first answer these two questions in order:\n"
-            "1. How many action points do you expect are still needed to finish, including this turn?\n"
+            "1. How many additional action points do you expect are still needed to finish from this turn onward? "
+            "Count the action points you expect to spend starting in this turn and continuing until the task is complete. "
+            "This is not the same as the current budget remaining shown in the state.\n"
             "2. How many action points do you expect to use in this turn?\n"
             "Fill <remaining_action_points_estimation> and <action_points_estimation> with integers "
             "in the required response format."
@@ -1257,7 +1319,7 @@ class CtxManagerWrapper:
         self._append_note_to_last_user_message(
             messages_list,
             note=note,
-            marker="How many action points do you expect are still needed to finish, including this turn?",
+            marker="How many additional action points do you expect are still needed to finish from this turn onward?",
         )
 
     def _build_eval_compliance_turn_note(

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 
@@ -12,14 +12,9 @@ class RobotouilleEnvConfig:
     max_action_space: int = 256
     enable_action_budget: bool = False
     max_action_points: int = 10
-    action_lookup: Optional[Dict[int, str]] = field(default_factory=dict)
+    action_lookup: Optional[Dict[int, str]] = None
     test_rewards: Optional[List[float]] = None
 
     def __post_init__(self):
         if self.max_action_points < 0:
             raise ValueError("max_action_points must be non-negative.")
-        if not self.action_lookup:
-            self.action_lookup = {
-                idx: f"Action[{idx}]"
-                for idx in range(self.max_action_space)
-            }

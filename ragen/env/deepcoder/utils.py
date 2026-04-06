@@ -8,7 +8,7 @@ import os
 import subprocess
 import tempfile
 import textwrap
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 from datasets import concatenate_datasets, load_dataset
 
@@ -26,16 +26,32 @@ except Exception:
         return problem
 
 
-def prepare_deepcoder_data(train_size: int = None, test_size: int = None):
-    train_dataset = concatenate_datasets([
-        load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="primeintellect", split="train"),
-        load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="taco", split="train"),
-        load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="lcbv5", split="train"),
-    ])
-    test_dataset = concatenate_datasets([
-        load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="codeforces", split="test"),
-        load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="lcbv5", split="test"),
-    ])
+def prepare_deepcoder_data(
+    train_size: int = None,
+    test_size: int = None,
+    splits: Optional[Iterable[str]] = None,
+):
+    requested_splits = {
+        str(split).strip().lower()
+        for split in (splits or ("train", "test"))
+        if str(split).strip()
+    }
+    if not requested_splits:
+        requested_splits = {"train", "test"}
+
+    train_dataset = None
+    if "train" in requested_splits:
+        train_dataset = concatenate_datasets([
+            # load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="primeintellect", split="train"),
+            # load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="taco", split="train"),
+            load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="lcbv5", split="train"),
+        ])
+    test_dataset = None
+    if "test" in requested_splits:
+        test_dataset = concatenate_datasets([
+            load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="codeforces", split="test"),
+            load_dataset("agentica-org/DeepCoder-Preview-Dataset", name="lcbv5", split="test"),
+        ])
 
     def preprocess_fn(example, idx):
         starter_code = example.get("starter_code", "")
@@ -80,17 +96,31 @@ def prepare_deepcoder_data(train_size: int = None, test_size: int = None):
             "metadata": json.dumps(metadata),
         }
 
-    if train_size:
+    if train_dataset is not None and train_size:
         train_dataset = train_dataset.select(range(min(train_size, len(train_dataset))))
-    if test_size:
+    if test_dataset is not None and test_size:
         test_dataset = test_dataset.select(range(min(test_size, len(test_dataset))))
 
-    train_dataset = train_dataset.map(preprocess_fn, with_indices=True, writer_batch_size=10, num_proc=16)
-    test_dataset = test_dataset.map(preprocess_fn, with_indices=True, writer_batch_size=10, num_proc=16)
+    if train_dataset is not None:
+        train_dataset = train_dataset.map(
+            preprocess_fn,
+            with_indices=True,
+            writer_batch_size=10,
+            num_proc=16,
+        )
+    if test_dataset is not None:
+        test_dataset = test_dataset.map(
+            preprocess_fn,
+            with_indices=True,
+            writer_batch_size=10,
+            num_proc=16,
+        )
 
     if DatasetRegistry is not None:
-        train_dataset = DatasetRegistry.register_dataset("deepcoder", train_dataset, "train")
-        test_dataset = DatasetRegistry.register_dataset("deepcoder", test_dataset, "test")
+        if train_dataset is not None:
+            train_dataset = DatasetRegistry.register_dataset("deepcoder", train_dataset, "train")
+        if test_dataset is not None:
+            test_dataset = DatasetRegistry.register_dataset("deepcoder", test_dataset, "test")
 
     return train_dataset, test_dataset
 

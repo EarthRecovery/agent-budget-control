@@ -20,6 +20,7 @@ import time
 from hydra.utils import to_absolute_path
 import numpy as np
 from omegaconf import OmegaConf, open_dict
+from tqdm.auto import tqdm
 import wandb
 import httpx
 
@@ -51,6 +52,7 @@ class VllmWrapperWg:  # Thi is a developing class for eval and test
     def __init__(self, config, tokenizer):
         self.config = config
         self.tokenizer = tokenizer
+        self._supports_use_tqdm = None
         model_name = config.actor_rollout_ref.model.path
         ro_config = config.actor_rollout_ref.rollout
         temperature = _get_rollout_val_kwarg(ro_config, "temperature", default=1.0)
@@ -108,7 +110,24 @@ class VllmWrapperWg:  # Thi is a developing class for eval and test
         input_texts = self.tokenizer.batch_decode(input_ids, skip_special_tokens=False)
         input_texts = [i.replace("<|endoftext|>", "") for i in input_texts]
 
-        outputs = self.llm.generate(input_texts, sampling_params=self.sampling_params)
+        meta_info = lm_inputs.meta_info or {}
+        show_progress = bool(meta_info.get("validate", False))
+        generate_kwargs = {"sampling_params": self.sampling_params}
+        if show_progress and self._supports_use_tqdm is not False:
+            try:
+                outputs = self.llm.generate(
+                    input_texts,
+                    use_tqdm=True,
+                    **generate_kwargs,
+                )
+                self._supports_use_tqdm = True
+            except TypeError as exc:
+                if "use_tqdm" not in str(exc):
+                    raise
+                self._supports_use_tqdm = False
+                outputs = self.llm.generate(input_texts, **generate_kwargs)
+        else:
+            outputs = self.llm.generate(input_texts, **generate_kwargs)
         texts = [output.outputs[0].text for output in outputs]
 
         # get the entropy of the response
@@ -253,28 +272,55 @@ class ApiCallingWrapperWg:
                     active_indices.append(idx)
                     active_messages_list.append(messages)
 
+        meta_info = lm_inputs.meta_info or {}
+        show_progress = bool(meta_info.get("validate", False))
+        progress_bar = (
+            tqdm(
+                total=len(messages_list),
+                desc="API Eval Requests",
+                unit="req",
+                dynamic_ncols=True,
+            )
+            if show_progress and len(messages_list) > 0
+            else None
+        )
         unresolved_failed_messages = []
-        for batch_indices, batch_messages_list in self._iter_api_batches(
-            active_indices,
-            active_messages_list,
-        ):
-            results, failed_messages = self.llm.run_batch(
-                messages_list=batch_messages_list, **self.llm_kwargs
-            ) if batch_messages_list else ([], [])
-            unresolved_failed_messages.extend(failed_messages)
+        try:
+            skipped_requests = len(messages_list) - len(active_messages_list)
+            if progress_bar is not None and skipped_requests > 0:
+                progress_bar.update(skipped_requests)
+                progress_bar.set_postfix(skipped=skipped_requests, refresh=False)
 
-            for idx, result in zip(batch_indices, results):
-                texts[idx] = result.get("response", "")
-                api_interactions[idx] = list(result.get("attempts", []) or [])
-                api_usages[idx] = result.get("usage")
-                if not result.get("success", False):
-                    response_errors[idx] = {
-                        "error": result.get("error"),
-                        "error_type": result.get("error_type"),
-                        "error_code": result.get("error_code"),
-                        "status_code": result.get("status_code"),
-                        "retryable": result.get("retryable", False),
-                    }
+            for batch_indices, batch_messages_list in self._iter_api_batches(
+                active_indices,
+                active_messages_list,
+            ):
+                results, failed_messages = self.llm.run_batch(
+                    messages_list=batch_messages_list,
+                    progress_bar=progress_bar,
+                    **self.llm_kwargs,
+                ) if batch_messages_list else ([], [])
+                unresolved_failed_messages.extend(failed_messages)
+
+                for idx, result in zip(batch_indices, results):
+                    texts[idx] = result.get("response", "")
+                    api_interactions[idx] = list(result.get("attempts", []) or [])
+                    api_usages[idx] = result.get("usage")
+                    if not result.get("success", False):
+                        response_errors[idx] = {
+                            "error": result.get("error"),
+                            "error_type": result.get("error_type"),
+                            "error_code": result.get("error_code"),
+                            "status_code": result.get("status_code"),
+                            "retryable": result.get("retryable", False),
+                        }
+        finally:
+            if progress_bar is not None:
+                total_failures = sum(1 for error in response_errors if error is not None)
+                progress_bar.set_postfix(failures=total_failures, refresh=False)
+                if progress_bar.n < progress_bar.total:
+                    progress_bar.update(progress_bar.total - progress_bar.n)
+                progress_bar.close()
         if unresolved_failed_messages:
             print(
                 f"[DEBUG] unresolved failed messages after retries: "
@@ -367,6 +413,19 @@ class LLMAgentProxy:
         multi_turn = max_turn > 1
         finalized = False
         last_inputs = None
+        total_envs = len(env_outputs)
+        show_progress = bool(val or (dataproto.meta_info or {}).get("validate", False))
+        progress_bar = (
+            tqdm(
+                total=total_envs,
+                desc="Eval Progress",
+                unit="env",
+                dynamic_ncols=True,
+            )
+            if show_progress and total_envs > 0
+            else None
+        )
+        active_env_count = total_envs
 
         n_turns, n_tokens, entropys = (
             np.zeros(len(env_outputs)),
@@ -374,62 +433,102 @@ class LLMAgentProxy:
             np.zeros(len(env_outputs)),
         )  # to calculate instance-level entropy
 
-        for i in range(max_turn):
-            if len(env_outputs) == 0:
-                break
-            lm_inputs: DataProto = ctx_manager.get_lm_inputs(
-                env_outputs, prepare_for_update=False
-            )
-            lm_inputs.meta_info = (
-                dataproto.meta_info
-            )  # TODO: setup vllm early stop when max length is reached. make sure this can be done
-            last_inputs = lm_inputs
-            if multi_turn:
-                if i == 0:
-                    mode = "multiturn-start"
-                elif i == max_turn - 1:
-                    mode = "multiturn-end"
-                else:
-                    mode = "multiturn-middle"
-            else:
-                mode = "singleturn"
-            lm_inputs.meta_info["mode"] = mode
-            self.ctx_wrapper.set_state(turn_idx=i, mode=mode, max_turn=max_turn)
-            generation_suffix = self._get_generation_suffix()
-            lm_inputs = self.ctx_wrapper.intercept(
-                lm_inputs,
-                add_generation_prompt=True,
-                generation_suffix=generation_suffix,
-            )
-            lm_outputs: DataProto = self.generate_sequences(lm_inputs)
-            self.ctx_wrapper.log_outputs(lm_outputs)
+        try:
+            if progress_bar is not None:
+                progress_bar.set_postfix(turn=f"0/{max_turn}", active=active_env_count, refresh=False)
 
-            # calculate entropy
-            if "entropys" in lm_outputs.non_tensor_batch:
-                turn_entropy, env_ids = (
-                    lm_outputs.non_tensor_batch["entropys"],
-                    lm_outputs.non_tensor_batch["env_ids"],
+            for i in range(max_turn):
+                if len(env_outputs) == 0:
+                    break
+                lm_inputs: DataProto = ctx_manager.get_lm_inputs(
+                    env_outputs, prepare_for_update=False
                 )
-                n_tokens[env_ids] += lm_outputs.non_tensor_batch["n_tokens"]
-                entropys[env_ids] += turn_entropy
-                n_turns[env_ids] += 1
+                lm_inputs.meta_info = (
+                    dataproto.meta_info
+                )  # TODO: setup vllm early stop when max length is reached. make sure this can be done
+                last_inputs = lm_inputs
+                if multi_turn:
+                    if i == 0:
+                        mode = "multiturn-start"
+                    elif i == max_turn - 1:
+                        mode = "multiturn-end"
+                    else:
+                        mode = "multiturn-middle"
+                else:
+                    mode = "singleturn"
+                lm_inputs.meta_info["mode"] = mode
+                self.ctx_wrapper.set_state(turn_idx=i, mode=mode, max_turn=max_turn)
+                generation_suffix = self._get_generation_suffix()
+                lm_inputs = self.ctx_wrapper.intercept(
+                    lm_inputs,
+                    add_generation_prompt=True,
+                    generation_suffix=generation_suffix,
+                )
+                if show_progress:
+                    batch_size = len(env_outputs)
+                    if lm_inputs.non_tensor_batch is not None:
+                        env_ids = lm_inputs.non_tensor_batch.get("env_ids")
+                        if env_ids is not None:
+                            try:
+                                batch_size = len(env_ids)
+                            except TypeError:
+                                pass
+                    backend = (
+                        "local"
+                        if isinstance(self.actor_wg, VllmWrapperWg)
+                        else "api"
+                        if isinstance(self.actor_wg, ApiCallingWrapperWg)
+                        else type(self.actor_wg).__name__
+                    )
+                    tqdm.write(
+                        f"[Eval] {backend} generation start: "
+                        f"turn={i + 1}/{max_turn}, batch_size={batch_size}, active_envs={len(env_outputs)}"
+                    )
+                lm_outputs: DataProto = self.generate_sequences(lm_inputs)
+                self.ctx_wrapper.log_outputs(lm_outputs)
 
-            if mode == "multiturn-end":
-                finalized = True
-            env_inputs: List[Dict] = ctx_manager.get_env_inputs(lm_outputs)
-            env_outputs: List[Dict] = es_manager.step(env_inputs)
-            if len(env_outputs) == 0:  # all finished
-                if multi_turn and not finalized and last_inputs is not None:
-                    last_inputs.meta_info["skip_generation"] = True
-                    last_inputs.meta_info["mode"] = "multiturn-end"
-                    self.generate_sequences(last_inputs)
+                # calculate entropy
+                if "entropys" in lm_outputs.non_tensor_batch:
+                    turn_entropy, env_ids = (
+                        lm_outputs.non_tensor_batch["entropys"],
+                        lm_outputs.non_tensor_batch["env_ids"],
+                    )
+                    n_tokens[env_ids] += lm_outputs.non_tensor_batch["n_tokens"]
+                    entropys[env_ids] += turn_entropy
+                    n_turns[env_ids] += 1
+
+                if mode == "multiturn-end":
                     finalized = True
-                break
+                env_inputs: List[Dict] = ctx_manager.get_env_inputs(lm_outputs)
+                env_outputs = es_manager.step(env_inputs)
+                if progress_bar is not None:
+                    new_active_env_count = len(env_outputs)
+                    completed_envs = max(0, active_env_count - new_active_env_count)
+                    if completed_envs > 0:
+                        progress_bar.update(completed_envs)
+                    active_env_count = new_active_env_count
+                    progress_bar.set_postfix(
+                        turn=f"{i + 1}/{max_turn}",
+                        active=active_env_count,
+                        refresh=False,
+                    )
+                if len(env_outputs) == 0:  # all finished
+                    if multi_turn and not finalized and last_inputs is not None:
+                        last_inputs.meta_info["skip_generation"] = True
+                        last_inputs.meta_info["mode"] = "multiturn-end"
+                        self.generate_sequences(last_inputs)
+                        finalized = True
+                    break
 
-        if multi_turn and not finalized and last_inputs is not None:
-            last_inputs.meta_info["skip_generation"] = True
-            last_inputs.meta_info["mode"] = "multiturn-end"
-            self.generate_sequences(last_inputs)
+            if multi_turn and not finalized and last_inputs is not None:
+                last_inputs.meta_info["skip_generation"] = True
+                last_inputs.meta_info["mode"] = "multiturn-end"
+                self.generate_sequences(last_inputs)
+        finally:
+            if progress_bar is not None:
+                if progress_bar.n < progress_bar.total:
+                    progress_bar.update(progress_bar.total - progress_bar.n)
+                progress_bar.close()
         rollout_states = es_manager.get_rollout_states()
         self.ctx_wrapper.finalize_rollout(rollout_states)
         include_collapse_data = True

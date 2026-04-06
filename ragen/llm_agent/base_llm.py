@@ -1,14 +1,17 @@
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Union, Any, Tuple
+import inspect
 import os
 import asyncio
+import random
 import time
 
 import httpx
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from together import AsyncTogether
+from tqdm.auto import tqdm
 
 from .model_capabilities import is_openai_reasoning_model_name
 
@@ -78,6 +81,42 @@ def _normalize_usage(usage: Any) -> Optional[Dict[str, Any]]:
         "raw": raw_usage,
     }
 
+
+def _extract_retry_after_seconds(error: Exception) -> Optional[float]:
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+
+    retry_after = headers.get("retry-after")
+    if retry_after:
+        try:
+            return max(0.0, float(retry_after))
+        except (TypeError, ValueError):
+            return None
+
+    retry_after_ms = headers.get("retry-after-ms")
+    if retry_after_ms:
+        try:
+            return max(0.0, float(retry_after_ms) / 1000.0)
+        except (TypeError, ValueError):
+            return None
+
+    return None
+
+
+async def _maybe_aclose_client(client: Any) -> None:
+    if client is None:
+        return
+
+    close_method = getattr(client, "close", None)
+    if close_method is None:
+        return
+
+    close_result = close_method()
+    if inspect.isawaitable(close_result):
+        await close_result
+
 class LLMProvider(ABC):
     """Abstract base class for LLM providers"""
     
@@ -85,6 +124,9 @@ class LLMProvider(ABC):
     async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
         """Generate a response from the LLM"""
         pass
+
+    async def close(self) -> None:
+        return None
 
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider implementation"""
@@ -102,13 +144,28 @@ class OpenAIProvider(LLMProvider):
             raise ValueError("OpenAI API key not provided and not found in environment variables")
 
         # Disable SDK-level retries so batch retry behavior is controlled in ConcurrentLLM.
-        client_kwargs = {
+        self._client_kwargs = {
             "api_key": self.api_key,
             "max_retries": 0,
         }
         if timeout is not None:
-            client_kwargs["timeout"] = timeout
-        self.client = AsyncOpenAI(**client_kwargs)
+            self._client_kwargs["timeout"] = timeout
+        self.client = None
+        self._client_loop_id = None
+
+    def _get_client(self) -> AsyncOpenAI:
+        loop_id = id(asyncio.get_running_loop())
+        if self.client is None or self._client_loop_id != loop_id:
+            self.client = AsyncOpenAI(**self._client_kwargs)
+            self._client_loop_id = loop_id
+        return self.client
+
+    async def close(self) -> None:
+        if self.client is None:
+            return
+        await _maybe_aclose_client(self.client)
+        self.client = None
+        self._client_loop_id = None
 
     def _normalize_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         normalized = dict(kwargs)
@@ -131,7 +188,7 @@ class OpenAIProvider(LLMProvider):
         kwargs = self._normalize_kwargs(kwargs)
         messages = self._normalize_messages(messages)
 
-        response = await self.client.chat.completions.create(
+        response = await self._get_client().chat.completions.create(
             model=self.model_name,
             messages=messages,
             **kwargs
@@ -162,21 +219,36 @@ class DeepSeekProvider(LLMProvider):
             raise ValueError("DeepSeek API key not provided and not found in environment variables")
 
         # Disable SDK-level retries so batch retry behavior is controlled in ConcurrentLLM.
-        client_kwargs = {
+        self._client_kwargs = {
             "api_key": self.api_key,
             "base_url": "https://api.deepseek.com",
             "max_retries": 0,
         }
         if timeout is not None:
-            client_kwargs["timeout"] = timeout
-        self.client = AsyncOpenAI(**client_kwargs)
+            self._client_kwargs["timeout"] = timeout
+        self.client = None
+        self._client_loop_id = None
+
+    def _get_client(self) -> AsyncOpenAI:
+        loop_id = id(asyncio.get_running_loop())
+        if self.client is None or self._client_loop_id != loop_id:
+            self.client = AsyncOpenAI(**self._client_kwargs)
+            self._client_loop_id = loop_id
+        return self.client
+
+    async def close(self) -> None:
+        if self.client is None:
+            return
+        await _maybe_aclose_client(self.client)
+        self.client = None
+        self._client_loop_id = None
     
     async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
         if "o1-mini" in self.model_name:
             if messages[0]["role"] == "system":
                 messages = messages[1:]
             
-        response = await self.client.chat.completions.create(
+        response = await self._get_client().chat.completions.create(
             model=self.model_name,
             messages=messages,
             **kwargs
@@ -203,7 +275,23 @@ class AnthropicProvider(LLMProvider):
         if not self.api_key:
             raise ValueError("Anthropic API key not provided and not found in environment variables")
         
-        self.client = AsyncAnthropic(api_key=self.api_key)
+        self._client_kwargs = {"api_key": self.api_key}
+        self.client = None
+        self._client_loop_id = None
+
+    def _get_client(self) -> AsyncAnthropic:
+        loop_id = id(asyncio.get_running_loop())
+        if self.client is None or self._client_loop_id != loop_id:
+            self.client = AsyncAnthropic(**self._client_kwargs)
+            self._client_loop_id = loop_id
+        return self.client
+
+    async def close(self) -> None:
+        if self.client is None:
+            return
+        await _maybe_aclose_client(self.client)
+        self.client = None
+        self._client_loop_id = None
     
     async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
         # Extract system message if present
@@ -220,7 +308,7 @@ class AnthropicProvider(LLMProvider):
                     "content": msg["content"]
                 })
         
-        response = await self.client.messages.create(
+        response = await self._get_client().messages.create(
             model=self.model_name,
             system=system_content,
             messages=chat_messages,
@@ -246,10 +334,26 @@ class TogetherProvider(LLMProvider):
         if not self.api_key:
             raise ValueError("Together API key not provided and not found in environment variables")
         
-        self.client = AsyncTogether(api_key=self.api_key)
+        self._client_kwargs = {"api_key": self.api_key}
+        self.client = None
+        self._client_loop_id = None
+
+    def _get_client(self) -> AsyncTogether:
+        loop_id = id(asyncio.get_running_loop())
+        if self.client is None or self._client_loop_id != loop_id:
+            self.client = AsyncTogether(**self._client_kwargs)
+            self._client_loop_id = loop_id
+        return self.client
+
+    async def close(self) -> None:
+        if self.client is None:
+            return
+        await _maybe_aclose_client(self.client)
+        self.client = None
+        self._client_loop_id = None
     
     async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
-        response = await self.client.chat.completions.create(
+        response = await self._get_client().chat.completions.create(
             model=self.model_name,
             messages=messages,
             **kwargs
@@ -316,8 +420,10 @@ class ConcurrentLLM:
         status_code = getattr(error, "status_code", None)
         error_code = getattr(error, "code", None)
         error_type = getattr(error, "type", None)
+        exception_class = type(error).__name__
         error_message = str(error)
         error_body = getattr(error, "body", None)
+        retry_after_seconds = _extract_retry_after_seconds(error)
 
         if isinstance(error_body, dict):
             error_payload = error_body.get("error", error_body)
@@ -354,9 +460,11 @@ class ConcurrentLLM:
             "success": False,
             "error": error_message,
             "error_type": error_type,
+            "exception_class": exception_class,
             "error_code": error_code,
             "status_code": status_code,
             "retryable": retryable,
+            "retry_after_seconds": retry_after_seconds,
             "usage": None,
             "request_id": getattr(error, "request_id", None),
         }
@@ -371,6 +479,7 @@ class ConcurrentLLM:
         request_id: Optional[str],
         error: Optional[str] = None,
         error_type: Optional[str] = None,
+        exception_class: Optional[str] = None,
         error_code: Optional[str] = None,
         status_code: Optional[Any] = None,
         retryable: Optional[bool] = None,
@@ -388,38 +497,72 @@ class ConcurrentLLM:
             "usage": usage or None,
             "error": error,
             "error_type": error_type,
+            "exception_class": exception_class,
             "error_code": error_code,
             "status_code": status_code,
             "retryable": retryable,
         }
-    
-    def run_batch(self, 
-                messages_list: List[List[Dict[str, str]]], 
-                **kwargs) -> Tuple[List[Dict[str, Any]], List[List[Dict[str, str]]]]:
-        """Process batches with retries in separate event loops, using id() to track messages"""
 
+    def _compute_retry_sleep_seconds(
+        self,
+        *,
+        retry_count: int,
+        retry_failure_results: List[Dict[str, Any]],
+        initial_retry_delay_seconds: float,
+        max_retry_delay_seconds: float,
+        retry_jitter_seconds: float,
+    ) -> float:
+        retry_after_hints = [
+            float(result["retry_after_seconds"])
+            for result in retry_failure_results
+            if result.get("retry_after_seconds") is not None
+        ]
+        if retry_after_hints:
+            return min(max_retry_delay_seconds, max(retry_after_hints))
+
+        base_delay = min(
+            max_retry_delay_seconds,
+            initial_retry_delay_seconds * (2 ** max(0, retry_count)),
+        )
+        if retry_jitter_seconds <= 0:
+            return base_delay
+
+        jitter = random.uniform(0.0, min(retry_jitter_seconds, base_delay))
+        return min(max_retry_delay_seconds, base_delay + jitter)
+
+    async def _run_batch_async(
+        self,
+        messages_list: List[List[Dict[str, str]]],
+        progress_bar: Optional[tqdm],
+        generate_kwargs: Dict[str, Any],
+        max_retries: int,
+        initial_retry_delay_seconds: float,
+        max_retry_delay_seconds: float,
+        retry_jitter_seconds: float,
+    ) -> Tuple[List[Dict[str, Any]], List[List[Dict[str, str]]]]:
         results = [None] * len(messages_list)
         position_map = {id(messages): i for i, messages in enumerate(messages_list)}
         latest_failure_results: Dict[int, Dict[str, Any]] = {}
         attempt_histories: Dict[int, List[Dict[str, Any]]] = {
             i: [] for i in range(len(messages_list))
         }
-        
-        # Queue to store unfinished or failed tasks
+
+        self._semaphore = None
         current_batch = messages_list.copy()
-        max_retries = kwargs.get("max_retries", 100)
         retry_count = 0
         next_batch: List[List[Dict[str, str]]] = []
-        
-        while current_batch and retry_count < max_retries:
-            async def process_batch():
-                self._semaphore = None  # Reset semaphore for this event loop
+
+        try:
+            while current_batch and retry_count < max_retries:
                 batch_results = []
                 failures = []
+                retry_failure_results = []
                 attempt_number = retry_count + 1
-                
-                tasks_with_messages = [(msg, asyncio.create_task(self.generate(msg, **kwargs))) 
-                                    for msg in current_batch]
+
+                tasks_with_messages = [
+                    (msg, asyncio.create_task(self.generate(msg, **generate_kwargs)))
+                    for msg in current_batch
+                ]
                 for messages, task in tasks_with_messages:
                     try:
                         response = await task
@@ -444,9 +587,18 @@ class ConcurrentLLM:
                             "attempts": list(attempt_histories[position]),
                         }))
                     except Exception as e:
-                        print(f'[DEBUG] error: {e}')
                         position = position_map[id(messages)]
                         failure_result = self._build_failure_result(messages, e)
+                        print(
+                            "[DEBUG] request failed: "
+                            f"exception_class={failure_result.get('exception_class')} "
+                            f"status_code={failure_result.get('status_code')} "
+                            f"error_type={failure_result.get('error_type')} "
+                            f"error_code={failure_result.get('error_code')} "
+                            f"request_id={failure_result.get('request_id')} "
+                            f"retryable={failure_result.get('retryable')} "
+                            f"message={failure_result.get('error')}"
+                        )
                         attempt_histories[position].append(
                             self._build_interaction_record(
                                 attempt=attempt_number,
@@ -456,6 +608,7 @@ class ConcurrentLLM:
                                 request_id=failure_result.get("request_id"),
                                 error=failure_result.get("error"),
                                 error_type=failure_result.get("error_type"),
+                                exception_class=failure_result.get("exception_class"),
                                 error_code=failure_result.get("error_code"),
                                 status_code=failure_result.get("status_code"),
                                 retryable=failure_result.get("retryable"),
@@ -464,63 +617,100 @@ class ConcurrentLLM:
                         latest_failure_results[position] = failure_result
                         if failure_result["retryable"]:
                             failures.append(messages)
+                            retry_failure_results.append(failure_result)
                         else:
                             failure_result["attempts"] = list(attempt_histories[position])
                             batch_results.append((position, failure_result))
-                
-                return batch_results, failures
-            
-            # Run in fresh event loop
-            batch_results, next_batch = asyncio.run(process_batch())
-            
-            # Update results with successful responses
-            for position, result in batch_results:
-                results[position] = result
-            
-            # Update for next iteration
-            if next_batch:
-                retry_count += 1
-                # Update position map for failed messages
-                position_map = {id(messages): position_map[id(messages)] 
-                            for messages in next_batch}
-                
-                current_batch = next_batch
-                time.sleep(5)
-                print(f'[DEBUG] {len(next_batch)} failed messages, retry_count: {retry_count}')
-            else:
-                break
 
-        unresolved_failures = list(current_batch) if current_batch and retry_count >= max_retries else []
-        for messages in unresolved_failures:
-            position = position_map[id(messages)]
-            failure_result = dict(
-                latest_failure_results.get(position)
-                or self._build_failure_result(messages, RuntimeError("Max retries exceeded"))
+                for position, result in batch_results:
+                    results[position] = result
+                if progress_bar is not None and batch_results:
+                    progress_bar.update(len(batch_results))
+                    progress_bar.set_postfix(retries=retry_count, refresh=False)
+
+                if failures:
+                    sleep_seconds = self._compute_retry_sleep_seconds(
+                        retry_count=retry_count,
+                        retry_failure_results=retry_failure_results,
+                        initial_retry_delay_seconds=initial_retry_delay_seconds,
+                        max_retry_delay_seconds=max_retry_delay_seconds,
+                        retry_jitter_seconds=retry_jitter_seconds,
+                    )
+                    retry_count += 1
+                    next_batch = failures
+                    position_map = {
+                        id(messages): position_map[id(messages)]
+                        for messages in next_batch
+                    }
+                    current_batch = next_batch
+                    if retry_count < max_retries:
+                        print(
+                            f"[DEBUG] retrying {len(next_batch)} failed messages after "
+                            f"{sleep_seconds:.2f}s backoff; retry_count={retry_count}"
+                        )
+                        await asyncio.sleep(sleep_seconds)
+                else:
+                    current_batch = []
+
+            unresolved_failures = list(current_batch) if current_batch and retry_count >= max_retries else []
+            for messages in unresolved_failures:
+                position = position_map[id(messages)]
+                failure_result = dict(
+                    latest_failure_results.get(position)
+                    or self._build_failure_result(messages, RuntimeError("Max retries exceeded"))
+                )
+                failure_result["retryable"] = False
+                failure_result["error"] = f'{failure_result.get("error", "Max retries exceeded")} (max retries exceeded)'
+                failure_result["attempts"] = list(attempt_histories[position])
+                results[position] = failure_result
+            if progress_bar is not None and unresolved_failures:
+                progress_bar.update(len(unresolved_failures))
+                progress_bar.set_postfix(retries=retry_count, refresh=False)
+
+            for idx, result in enumerate(results):
+                if result is None:
+                    results[idx] = {
+                        "messages": messages_list[idx],
+                        "response": "",
+                        "model": getattr(self.provider, "model_name", None),
+                        "provider": getattr(self.provider, "provider_name", None),
+                        "success": False,
+                        "error": "No response generated.",
+                        "error_type": None,
+                        "error_code": None,
+                        "status_code": None,
+                        "retryable": False,
+                        "usage": None,
+                        "request_id": None,
+                        "attempts": list(attempt_histories[idx]),
+                    }
+
+            return results, unresolved_failures
+        finally:
+            await self.provider.close()
+    
+    def run_batch(self, 
+                messages_list: List[List[Dict[str, str]]], 
+                progress_bar: Optional[tqdm] = None,
+                **kwargs) -> Tuple[List[Dict[str, Any]], List[List[Dict[str, str]]]]:
+        """Process a batch with retries inside one event loop."""
+
+        generate_kwargs = dict(kwargs)
+        max_retries = int(generate_kwargs.pop("max_retries", 100))
+        initial_retry_delay_seconds = float(generate_kwargs.pop("initial_retry_delay_seconds", 1.0))
+        max_retry_delay_seconds = float(generate_kwargs.pop("max_retry_delay_seconds", 30.0))
+        retry_jitter_seconds = float(generate_kwargs.pop("retry_jitter_seconds", 1.0))
+        return asyncio.run(
+            self._run_batch_async(
+                messages_list=messages_list,
+                progress_bar=progress_bar,
+                generate_kwargs=generate_kwargs,
+                max_retries=max_retries,
+                initial_retry_delay_seconds=initial_retry_delay_seconds,
+                max_retry_delay_seconds=max_retry_delay_seconds,
+                retry_jitter_seconds=retry_jitter_seconds,
             )
-            failure_result["retryable"] = False
-            failure_result["error"] = f'{failure_result.get("error", "Max retries exceeded")} (max retries exceeded)'
-            failure_result["attempts"] = list(attempt_histories[position])
-            results[position] = failure_result
-
-        for idx, result in enumerate(results):
-            if result is None:
-                results[idx] = {
-                    "messages": messages_list[idx],
-                    "response": "",
-                    "model": getattr(self.provider, "model_name", None),
-                    "provider": getattr(self.provider, "provider_name", None),
-                    "success": False,
-                    "error": "No response generated.",
-                    "error_type": None,
-                    "error_code": None,
-                    "status_code": None,
-                    "retryable": False,
-                    "usage": None,
-                    "request_id": None,
-                    "attempts": list(attempt_histories[idx]),
-                }
-
-        return results, unresolved_failures
+        )
 
 
 

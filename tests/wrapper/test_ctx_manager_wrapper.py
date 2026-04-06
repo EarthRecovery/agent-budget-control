@@ -140,6 +140,30 @@ def make_openai_reasoning_wrapper(tmp_path, *, start_group_index):
     return CtxManagerWrapper(config, DummyTokenizer())
 
 
+def make_dialogue_wrapper(tmp_path, *, start_group_index):
+    config = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "enable_ctx_wrapper": True,
+                "eval-estimation-single": False,
+                "eval-estimation-multi": False,
+                "enable_think": True,
+            },
+            "output": {
+                "dir": str(tmp_path),
+                "filename": "sokoban_origin.pkl",
+            },
+            "es_manager": {
+                "val": {
+                    "start_group_index": start_group_index,
+                    "group_size": 1,
+                }
+            },
+        }
+    )
+    return CtxManagerWrapper(config, DummyTokenizer())
+
+
 def make_compliance_wrapper(
     tmp_path,
     *,
@@ -308,6 +332,69 @@ def test_estimation_log_appends_existing_entries(tmp_path):
     assert payload[1]["absolute_group_id"] == 4
 
 
+def test_output_filename_enables_dialogue_log_for_regular_rollout(tmp_path):
+    wrapper = make_dialogue_wrapper(tmp_path, start_group_index=0)
+
+    assert wrapper.get_estimation_log_path().endswith("_eval_estimation_dialogues.json")
+    assert wrapper.get_eval_log_key() is None
+
+    wrapper.begin_rollout()
+    wrapper.turn_idx = 0
+    wrapper.mode = "singleturn"
+    wrapper._record_estimation_inputs(
+        non_tensor_batch={
+            "env_ids": [0],
+            "group_ids": [0],
+        },
+        messages_list=[
+            [
+                {"role": "system", "content": "Solve the Sokoban puzzle."},
+                {"role": "user", "content": "Turn 1 state"},
+            ]
+        ],
+        texts=["system\nuser"],
+        generation_suffix="<think>",
+    )
+
+    class DummyOutputs:
+        non_tensor_batch = {
+            "env_ids": [0],
+            "response_texts": ["<think>plan</think><answer>Right</answer>"],
+        }
+
+    wrapper._record_estimation_outputs(DummyOutputs())
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "CoordSokoban",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<think>plan</think><answer>Right</answer>",
+                        "llm_response": "<answer>Right</answer>",
+                        "actions": ["Right"],
+                        "reward": 1.0,
+                        "token_count": 8,
+                        "info": {"success": True},
+                    },
+                ],
+            }
+        ]
+    )
+
+    with open(wrapper.get_estimation_log_path(), "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+
+    assert len(payload) == 1
+    assert payload[0]["mode"] == "dialogue"
+    assert payload[0]["turns"][0]["messages"][1]["content"] == "Turn 1 state"
+    assert payload[0]["turns"][0]["raw_response"] == "<think>plan</think><answer>Right</answer>"
+    assert payload[0]["turns"][0]["actions"] == ["Right"]
+
+
 def test_record_estimation_outputs_keeps_blank_response_for_generation_error(tmp_path):
     wrapper = make_wrapper(tmp_path, start_group_index=0)
     wrapper.turn_idx = 0
@@ -447,6 +534,7 @@ def test_toolcall_eval_estimation_prompt_mentions_action_points_and_cap(tmp_path
     prompt = messages_list[0][0]["content"]
     assert "<remaining_action_points_estimation>" in prompt
     assert "<action_points_estimation>" in prompt
+    assert "not the same as the current budget remaining shown in the state" in prompt
     assert "between 0 and 6 inclusive" in prompt
 
 
@@ -623,13 +711,70 @@ def test_finalize_rollout_records_toolcall_action_point_fields(tmp_path):
     turns = record["turns"]
     assert record["max_action_points"] == 6
     assert turns[0]["estimate_remaining_action_points"] == 6
+    assert turns[0]["estimate_remaining_action_points_to_finish"] == 6
     assert turns[0]["actual_remaining_action_points"] == 5
+    assert turns[0]["actual_remaining_action_points_to_finish"] == 5
     assert turns[0]["estimate_action_points"] == 2
     assert turns[0]["actual_action_points"] == 2
+    assert turns[0]["action_points_used_before_turn"] == 0
+    assert turns[0]["cumulative_action_points_used"] == 2
+    assert turns[0]["budget_remaining_before_turn"] == 6
+    assert turns[0]["budget_remaining_after_turn"] == 4
+    assert turns[0]["toolcalls_used"] == 1
     assert turns[1]["estimate_remaining_action_points"] == 4
+    assert turns[1]["estimate_remaining_action_points_to_finish"] == 4
     assert turns[1]["actual_remaining_action_points"] == 3
+    assert turns[1]["actual_remaining_action_points_to_finish"] == 3
     assert turns[1]["estimate_action_points"] == 3
     assert turns[1]["actual_action_points"] == 3
+    assert turns[1]["action_points_used_before_turn"] == 2
+    assert turns[1]["cumulative_action_points_used"] == 5
+    assert turns[1]["budget_remaining_before_turn"] == 4
+    assert turns[1]["budget_remaining_after_turn"] == 1
+    assert turns[1]["toolcalls_used"] == 1
+
+
+def test_finalize_rollout_records_all_toolcall_action_names(tmp_path):
+    wrapper = make_toolcall_wrapper(
+        tmp_path,
+        start_group_index=0,
+        max_action_points=6,
+    )
+    wrapper.begin_rollout()
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "Robotouille",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": (
+                            "<budget-thinking>Budget</budget-thinking>"
+                            "<remaining_action_points_estimation>5</remaining_action_points_estimation>"
+                            "<action_points_estimation>3</action_points_estimation>"
+                            "<think>Plan</think><answer>move || pick up bun || cook patty</answer>"
+                        ),
+                        "llm_response": (
+                            "<think>Plan</think><answer>move || pick up bun || cook patty</answer>"
+                        ),
+                        "actions": ["move", "pick up bun", "cook patty"],
+                        "reward": 1.0,
+                        "token_count": 48,
+                        "action_points_used": 3,
+                        "info": {"success": True},
+                    },
+                ],
+            }
+        ]
+    )
+
+    turn = wrapper._estimation_records[0]["turns"][0]
+    assert turn["actions"] == ["move", "pick up bun", "cook patty"]
+    assert turn["action_names"] == ["move", "pick up bun", "cook patty"]
+    assert turn["toolcalls_used"] == 3
 
 
 def test_finalize_rollout_prefers_goal_predicate_ratio_in_json_reward(tmp_path):
@@ -1142,7 +1287,7 @@ def test_eval_toolcall_compliance_finalize_rollout_records_budget_fields(tmp_pat
     assert record_0["eval_compliance_toolcall_scope"] == [2, 4, 6]
     assert record_0["compliance_toolcall_limit"] == 2
     assert record_0["total_action_points_used"] == 2
-    assert record_0["total_toolcalls_used"] == 2
+    assert record_0["total_toolcalls_used"] == 1
     assert record_0["within_toolcall_limit"] is True
     assert record_0["toolcall_limit_delta"] == 0
     assert record_0["success_within_toolcall_limit"] is True
@@ -1158,6 +1303,7 @@ def test_eval_toolcall_compliance_finalize_rollout_records_budget_fields(tmp_pat
     turns_1 = record_1["turns"]
     assert record_1["compliance_toolcall_limit"] == 4
     assert record_1["total_action_points_used"] == 5
+    assert record_1["total_toolcalls_used"] == 2
     assert record_1["within_toolcall_limit"] is False
     assert record_1["toolcall_limit_delta"] == 1
     assert record_1["success_within_toolcall_limit"] is False

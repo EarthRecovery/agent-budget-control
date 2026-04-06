@@ -1,6 +1,12 @@
 from ragen.env.robotouille import RobotouilleEnv, RobotouilleEnvConfig
 
 
+def test_robotouille_config_keeps_action_lookup_optional():
+    config = RobotouilleEnvConfig()
+
+    assert config.action_lookup is None
+
+
 def test_render_includes_valid_action_costs_when_budget_enabled():
     env = RobotouilleEnv(
         RobotouilleEnvConfig(enable_action_budget=True, max_action_points=6)

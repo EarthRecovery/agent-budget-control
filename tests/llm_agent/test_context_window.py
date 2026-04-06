@@ -161,6 +161,104 @@ def test_toolcall_eval_estimation_generation_prefix_uses_budget_thinking(dummy_c
     assert ctx._get_generation_prefix() == "<budget-thinking>"
 
 
+def test_robotouille_omits_placeholder_action_lookup_from_prefix():
+    cfg = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "context_window_mode": "single_turn",
+                "max_context_window": 2,
+                "enable_think": False,
+                "use_turn_scores": False,
+                "action_sep": "|",
+                "max_actions_per_turn": 1,
+                "reward_normalization": {
+                    "grouping": "batch",
+                    "method": "identity",
+                },
+            },
+            "enable_response_mask": False,
+            "es_manager": {
+                "train": {
+                    "env_configs": {
+                        "n_groups": [1],
+                        "tags": ["Robotouille"],
+                    },
+                    "group_size": 1,
+                }
+            },
+            "custom_envs": {
+                "Robotouille": {
+                    "env_type": "robotouille",
+                    "max_actions_per_traj": 10,
+                }
+            },
+            "actor_rollout_ref": {
+                "rollout": {
+                    "response_length": 128,
+                }
+            },
+        }
+    )
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+
+    assert "Your available actions are:" not in ctx.prefix_lookup[0]
+    assert "Action[0]" not in ctx.prefix_lookup[0]
+
+
+def test_robotouille_flattens_nested_env_config_for_prompt_metadata():
+    cfg = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "context_window_mode": "single_turn",
+                "max_context_window": 2,
+                "enable_think": False,
+                "use_turn_scores": False,
+                "action_sep": "|",
+                "max_actions_per_turn": 1,
+                "reward_normalization": {
+                    "grouping": "batch",
+                    "method": "identity",
+                },
+            },
+            "enable_response_mask": False,
+            "es_manager": {
+                "train": {
+                    "env_configs": {
+                        "n_groups": [1],
+                        "tags": ["Robotouille"],
+                    },
+                    "group_size": 1,
+                }
+            },
+            "custom_envs": {
+                "Robotouille": {
+                    "env_type": "robotouille",
+                    "max_actions_per_traj": 10,
+                    "env_config": {
+                        "action_lookup": None,
+                        "enable_action_budget": True,
+                        "max_action_points": 6,
+                    },
+                }
+            },
+            "actor_rollout_ref": {
+                "rollout": {
+                    "response_length": 128,
+                }
+            },
+        }
+    )
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+
+    assert "Your available actions are:" not in ctx.prefix_lookup[0]
+    assert ctx.env_config_lookup[0]["enable_action_budget"] is True
+    assert ctx.env_config_lookup[0]["max_action_points"] == 6
+
+
 def test_default_generation_prefix_uses_answer_when_eval_estimation_disabled(dummy_config):
     tokenizer = DummyTokenizer()
     ctx = ContextManager(config=dummy_config, tokenizer=tokenizer, mode="train")

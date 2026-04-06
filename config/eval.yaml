@@ -1,6 +1,7 @@
 defaults:
   - envs
   - base
+  - _self_
 
 hydra:
   searchpath:

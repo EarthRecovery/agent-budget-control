@@ -164,6 +164,48 @@ class ContextManager:
         if env_type not in REGISTERED_ENV_CONFIGS:
             raise ValueError(f"Environment {env_type} is not installed. Please install it using the scripts/setup_{env_type}.sh script.")
 
+    def _resolve_env_prompt_config(self, env_config: Any) -> Dict[str, Any]:
+        env_config_new = asdict(REGISTERED_ENV_CONFIGS[env_config.env_type]())
+        raw_nested_env_config = None
+
+        for k, v in env_config.items():
+            if k == "env_config":
+                raw_nested_env_config = v
+                continue
+            env_config_new[k] = v
+
+        if raw_nested_env_config:
+            for k, v in raw_nested_env_config.items():
+                env_config_new[k] = v
+
+        if raw_nested_env_config is not None and hasattr(raw_nested_env_config, "get"):
+            if raw_nested_env_config.get("action_lookup", "__missing__") is None:
+                env_config_new["action_lookup"] = None
+
+        return env_config_new
+
+    def _has_placeholder_action_lookup(self, action_lookup: Any) -> bool:
+        if not action_lookup:
+            return False
+        if not hasattr(action_lookup, "values"):
+            return False
+
+        values = list(action_lookup.values())
+        if not values:
+            return False
+
+        placeholder_pattern = re.compile(r"^Action\[\d+\]$", re.IGNORECASE)
+        return all(
+            isinstance(value, str) and placeholder_pattern.fullmatch(value.strip())
+            for value in values
+        )
+
+    def _should_include_action_lookup(self, env_config_new: Dict[str, Any]) -> bool:
+        action_lookup = env_config_new.get("action_lookup")
+        if not action_lookup:
+            return False
+        return not self._has_placeholder_action_lookup(action_lookup)
+
     def _init_prefix_lookup(self):
         prefix_lookup = {}
         prefixes = {}
@@ -174,9 +216,7 @@ class ContextManager:
                 continue
 
             self._check_env_installed(env_config.env_type)
-            env_config_new = asdict(REGISTERED_ENV_CONFIGS[env_config.env_type]())
-            for k,v in env_config.items():
-                env_config_new[k] = v
+            env_config_new = self._resolve_env_prompt_config(env_config)
             env_instruction = env_config_new.get("env_instruction", "")
             observation_format = env_config_new.get("observation_format", "grid")
             if observation_format == "grid" and env_config_new.get("grid_vocab", False):
@@ -189,7 +229,7 @@ class ContextManager:
                     "Boxes on target, Player, and Player on target when applicable."
                 )
                 env_instruction += coord_hint
-            if env_config_new.get("action_lookup", False):
+            if self._should_include_action_lookup(env_config_new):
                 action_lookup_str = "\nYour available actions are:\n" + ", ".join([f"{v}" for k, v in env_config_new["action_lookup"].items()])
                 action_lookup_str += f"\nYou can make up to {env_config_new['max_actions_per_traj']} actions, separated by the action separator \" " + self.action_sep + " \"\n"
                 env_instruction += action_lookup_str
@@ -621,7 +661,7 @@ class ContextManager:
             FORMAT_PROMPT = (
                 "<budget-thinking> [Your action-budget-related reasoning] </budget-thinking> "
                 "<remaining_action_points_estimation> "
-                "[Your estimated remaining action points needed to finish, including this turn] "
+                "[Your estimated additional action points still needed to finish from this turn onward] "
                 "</remaining_action_points_estimation> "
                 "<action_points_estimation> [Your estimated action points used in this turn] </action_points_estimation> "
                 f"{answer_format}"

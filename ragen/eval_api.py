@@ -4,6 +4,7 @@ import time
 import hydra
 from transformers import AutoTokenizer
 from verl import DataProto
+from tqdm.auto import tqdm
 
 from ragen.eval_api_utils import (
     clone_config_for_val_chunk,
@@ -62,27 +63,48 @@ def main(config):
     start_time = time.time()
     chunk_rollouts = []
     total_chunks = len(rollout_chunks)
-    for chunk_index, (chunk_offset, chunk_start_group_index, chunk_env_groups) in enumerate(
-        rollout_chunks,
-        start=1,
-    ):
-        chunk_config = clone_config_for_val_chunk(
-            config,
-            chunk_offset=chunk_offset,
-            chunk_start_group_index=chunk_start_group_index,
-            chunk_env_groups=chunk_env_groups,
+    chunk_progress = (
+        tqdm(
+            total=total_chunks,
+            desc="API Eval Chunks",
+            unit="chunk",
+            dynamic_ncols=True,
         )
-        chunk_start_time = time.time()
-        if total_chunks > 1:
-            print(
-                f"Running rollout chunk {chunk_index}/{total_chunks}: "
-                f"start_group_index={chunk_start_group_index}, env_groups={chunk_env_groups}"
+        if total_chunks > 1
+        else None
+    )
+    try:
+        for chunk_index, (chunk_offset, chunk_start_group_index, chunk_env_groups) in enumerate(
+            rollout_chunks,
+            start=1,
+        ):
+            chunk_config = clone_config_for_val_chunk(
+                config,
+                chunk_offset=chunk_offset,
+                chunk_start_group_index=chunk_start_group_index,
+                chunk_env_groups=chunk_env_groups,
             )
-        rollouts = _run_val_rollout(chunk_config, tokenizer)
-        chunk_elapsed = time.time() - chunk_start_time
-        if total_chunks > 1:
-            _print_rollout_summary(f"chunk {chunk_index}/{total_chunks}", rollouts, chunk_elapsed)
-        chunk_rollouts.append(rollouts)
+            chunk_start_time = time.time()
+            if total_chunks > 1:
+                print(
+                    f"Running rollout chunk {chunk_index}/{total_chunks}: "
+                    f"start_group_index={chunk_start_group_index}, env_groups={chunk_env_groups}"
+                )
+            rollouts = _run_val_rollout(chunk_config, tokenizer)
+            chunk_elapsed = time.time() - chunk_start_time
+            if total_chunks > 1:
+                _print_rollout_summary(f"chunk {chunk_index}/{total_chunks}", rollouts, chunk_elapsed)
+            chunk_rollouts.append(rollouts)
+            if chunk_progress is not None:
+                chunk_progress.update(1)
+                chunk_progress.set_postfix(
+                    start_group_index=chunk_start_group_index,
+                    env_groups=chunk_env_groups,
+                    refresh=False,
+                )
+    finally:
+        if chunk_progress is not None:
+            chunk_progress.close()
 
     rollouts = (
         DataProto.concat(chunk_rollouts)
