@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:h200:4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120G
-#SBATCH --time=24:00:00
+#SBATCH --time=36:00:00
 #SBATCH --output=/u/ylin30/agent-budget-control/logs/slurm/webshop-mixed-%j.out
 #SBATCH --error=/u/ylin30/agent-budget-control/logs/slurm/webshop-mixed-%j.err
 

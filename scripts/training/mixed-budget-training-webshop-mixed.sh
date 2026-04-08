@@ -43,7 +43,7 @@ MIXED_TURN_RANGE="2,6"
 RUN_NAME=""
 LOGGER="['console','wandb']"
 OUTPUT_ROOT="logs/training"
-CHECKPOINT_ROOT="${REPO_ROOT}/model_saving/webshop-mixed"
+CHECKPOINT_ROOT="/projects/bflz/model_saving/webshop-mixed"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 
 usage() {
@@ -77,7 +77,7 @@ Options:
   --max-model-len N              Override actor_rollout_ref.rollout.max_model_len
   --max-num-batched-tokens N     Override actor_rollout_ref.rollout.max_num_batched_tokens
   --mixed-turn-range A,B         mixed turn budget range. Default: 2,6
-  --checkpoint-root PATH         Checkpoint root. Default: model_saving/webshop-mixed
+  --checkpoint-root PATH         Checkpoint root. Default: /projects/bflz/model_saving/webshop-mixed
   --run-name NAME                Explicit experiment name
   -h, --help                     Show this help
 EOF

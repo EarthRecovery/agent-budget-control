@@ -23,9 +23,9 @@ ALGO="PPO"
 
 STEPS=100
 SAVE_FREQ=50
-MAX_TURN=9
+MAX_TURN=7
 ALLOCATED_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}"
-GPUS="${GPUS:-${ALLOCATED_CUDA_VISIBLE_DEVICES:-0,1}}"
+GPUS="${GPUS:-${ALLOCATED_CUDA_VISIBLE_DEVICES:-0,1,2,3}}"
 GPUS_EXPLICITLY_SET=0
 GPU_MEMORY_UTILIZATION=0.3
 MAX_MODEL_LEN="10000"
@@ -42,7 +42,7 @@ PPO_MINI_BATCH_SIZE=32
 RUN_NAME=""
 LOGGER="['console','wandb']"
 OUTPUT_ROOT="logs/training"
-CHECKPOINT_ROOT="${REPO_ROOT}/model_saving/webshop-origin"
+CHECKPOINT_ROOT="/projects/bflz/model_saving/webshop-origin"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 
 usage() {
@@ -53,17 +53,17 @@ Plain WebShop RL only:
   - mixed turn budget: disabled
   - mixed token budget: disabled
   - rollout filtering: top_p=1.0
-  - recommended hardware: 2 GPUs (for example 2xH100)
+  - recommended hardware: 4 GPUs (for example 4xH100)
 
 Options:
-  --gpus LIST                    Comma-separated GPU ids. Default: Slurm allocation or 0,1
+  --gpus LIST                    Comma-separated GPU ids. Default: Slurm allocation or 0,1,2,3
   --steps N                      Total training steps. Default: 200
   --save-freq N                  Checkpoint save frequency. Default: 50
   --config NAME                  Hydra config name. Default: _6_webshop
   --model-path PATH              Model path. Default: Qwen/Qwen2.5-3B-Instruct
   --project-name NAME            W&B/Ray project name. Default: mixed-budget-training
   --algo NAME                    PPO or GRPO. Default: PPO
-  --max-turn N                   agent_proxy.max_turn. Default: 9
+  --max-turn N                   agent_proxy.max_turn. Default: 7
   --num-groups N                 Train env groups. Default: 8
   --group-size N                 Train group size. Default: 16
   --val-env-groups N             Validation env groups. Default: 128

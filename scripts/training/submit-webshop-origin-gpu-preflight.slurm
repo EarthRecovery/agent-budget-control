@@ -1,15 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=webshop-origin
+# Lightweight GPU preflight job for the WebShop origin training wrapper.
+# This validates Slurm allocation, environment setup, and command construction
+# without launching training.
+#SBATCH --job-name=webshop-origin-gpu-check
 #SBATCH --account=bflz-delta-gpu
-#SBATCH --partition=gpuH200x8
+#SBATCH --partition=gpuA40x4-preempt
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gres=gpu:h200:4
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=120G
-#SBATCH --time=36:00:00
-#SBATCH --output=/u/ylin30/agent-budget-control/logs/slurm/webshop-origin-%j.out
-#SBATCH --error=/u/ylin30/agent-budget-control/logs/slurm/webshop-origin-%j.err
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=00:15:00
+#SBATCH --output=/u/ylin30/agent-budget-control/logs/slurm/webshop-origin-gpu-check-%j.out
+#SBATCH --error=/u/ylin30/agent-budget-control/logs/slurm/webshop-origin-gpu-check-%j.err
 
 set -euo pipefail
 
@@ -92,3 +95,5 @@ print("Python dependency check: hydra/omegaconf/ray/wandb OK")
 PY
 
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY}" bash scripts/training/mixed-budget-training-webshop-origin.sh "$@"
+
+
