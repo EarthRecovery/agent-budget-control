@@ -13,9 +13,9 @@ export PYTHONPATH="$PWD:$PWD/verl"
 
 RUN_NAME=${RUN_NAME:-sokoban_api_eval_estimation}
 MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Instant}
-VAL_GROUPS=${VAL_GROUPS:-512}
+VAL_GROUPS=${VAL_GROUPS:-128}
 VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-128}
-MAX_TURN=${MAX_TURN:-10}
+MAX_TURN=${MAX_TURN:-6}
 MAX_ACTIONS_PER_TURN=${MAX_ACTIONS_PER_TURN:-1}
 VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-0}
 MAX_TOKENS=${MAX_TOKENS:-800}
@@ -26,8 +26,11 @@ API_BATCH_SIZE=${API_BATCH_SIZE:-16}
 API_CONNECT_TIMEOUT_SECONDS=${API_CONNECT_TIMEOUT_SECONDS:-10}
 API_REQUEST_TIMEOUT_SECONDS=${API_REQUEST_TIMEOUT_SECONDS:-180}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/budget-estimation-benchmark"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/sokoban-origin-gpt5.2-instant-512-main"}
+CONTEXT_WINDOW_MODE=${CONTEXT_WINDOW_MODE:-limited_multi_turn} # full | single_turn | limited_multi_turn
+MAX_CONTEXT_WINDOW=${MAX_CONTEXT_WINDOW:-5} # -1 keeps full history,
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/sokoban-origin-gpt5.2-instant-128-window=${MAX_CONTEXT_WINDOW}-max-turn=${MAX_TURN}"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
+
 
 mkdir -p "$OUTPUT_DIR" "$HYDRA_DIR"
 
@@ -42,6 +45,8 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   "agent_proxy.eval-estimation-multi=False" \
   "agent_proxy.eval_compliance_turn=False" \
   "agent_proxy.eval_compliance_turn_scope=[2,4,6,8,10]" \
+  "agent_proxy.context_window_mode=${CONTEXT_WINDOW_MODE}" \
+  "agent_proxy.max_context_window=${MAX_CONTEXT_WINDOW}" \
   agent_proxy.max_turn=${MAX_TURN} \
   agent_proxy.max_actions_per_turn=${MAX_ACTIONS_PER_TURN} \
   es_manager.val.env_groups=${VAL_GROUPS} \
@@ -55,8 +60,8 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   actor_rollout_ref.rollout.max_model_len=${MAX_MODEL_LEN} \
   actor_rollout_ref.rollout.max_num_batched_tokens=${MAX_BATCHED_TOKENS} \
   actor_rollout_ref.rollout.response_length=${MAX_TOKENS} \
-  output.dir="${OUTPUT_DIR}" \
-  output.filename="${RUN_NAME}.pkl" \
-  output.append_timestamp=True \
-  hydra.run.dir="${HYDRA_DIR}" \
-  hydra.output_subdir=null
+  "output.dir='${OUTPUT_DIR}'" \
+  "output.filename='${RUN_NAME}.pkl'" \
+  "output.append_timestamp=True" \
+  "hydra.run.dir='${HYDRA_DIR}'" \
+  "hydra.output_subdir=null"

@@ -54,12 +54,14 @@ def resolve_eval_estimation_mode(config) -> Optional[str]:
     single_enabled = bool(agent_proxy_cfg_get(config, "eval-estimation-single", False))
     multi_enabled = bool(agent_proxy_cfg_get(config, "eval-estimation-multi", False))
     toolcall_enabled = bool(agent_proxy_cfg_get(config, "eval-estimation-toolcall", False))
+    adaptation_turn_enabled = bool(agent_proxy_cfg_get(config, "eval_adaptation_turn", False))
     enabled_modes = [
         mode_name
         for mode_name, enabled in (
             ("single", single_enabled),
             ("multi", multi_enabled),
             ("toolcall", toolcall_enabled),
+            ("adaptation_turn", adaptation_turn_enabled),
         )
         if enabled
     ]
@@ -67,11 +69,40 @@ def resolve_eval_estimation_mode(config) -> Optional[str]:
         raise ValueError(
             "agent_proxy.eval-estimation-single, "
             "agent_proxy.eval-estimation-multi, and "
-            "agent_proxy.eval-estimation-toolcall cannot enable more than one at the same time."
+            "agent_proxy.eval-estimation-toolcall, and "
+            "agent_proxy.eval_adaptation_turn cannot enable more than one at the same time."
         )
     if enabled_modes:
         return enabled_modes[0]
     return None
+
+
+def resolve_eval_adaptation_turn_scope(config) -> List[int]:
+    raw_scope = agent_proxy_cfg_get(config, "eval_adaptation_turn_scope", [])
+    scope = _normalize_eval_compliance_scope(
+        raw_scope,
+        config_key="eval_adaptation_turn_scope",
+    )
+    if scope and len(scope) != 3:
+        raise ValueError(
+            "agent_proxy.eval_adaptation_turn_scope must contain exactly three integers: "
+            "[mutation_turn, budget_before_or_at_mutation_turn, budget_after_mutation_turn]."
+        )
+    return scope
+
+
+def resolve_eval_adaptation_turn_config(config) -> Optional[tuple[int, int, int]]:
+    enabled = bool(agent_proxy_cfg_get(config, "eval_adaptation_turn", False))
+    scope = resolve_eval_adaptation_turn_scope(config)
+    if not enabled:
+        return None
+    if not scope:
+        raise ValueError(
+            "agent_proxy.eval_adaptation_turn is enabled, but "
+            "agent_proxy.eval_adaptation_turn_scope is empty."
+        )
+    mutation_turn, budget_before, budget_after = scope
+    return int(mutation_turn), int(budget_before), int(budget_after)
 
 
 def _iter_active_env_tags(config) -> List[str]:

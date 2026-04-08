@@ -161,6 +161,17 @@ def test_toolcall_eval_estimation_generation_prefix_uses_budget_thinking(dummy_c
     assert ctx._get_generation_prefix() == "<budget-thinking>"
 
 
+def test_adaptation_turn_eval_estimation_generation_prefix_uses_budget_thinking(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["eval_adaptation_turn"] = True
+    cfg.agent_proxy["eval_adaptation_turn_scope"] = [2, 5, 3]
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+
+    assert ctx._get_generation_prefix() == "<budget-thinking>"
+
+
 def test_robotouille_omits_placeholder_action_lookup_from_prefix():
     cfg = OmegaConf.create(
         {
@@ -372,6 +383,23 @@ def test_toolcall_eval_estimation_format_prompt_includes_action_point_estimates(
     assert format_prompt.count("<budget-thinking>") == 1
     assert "<remaining_action_points_estimation>" in format_prompt
     assert "<action_points_estimation>" in format_prompt
+
+
+def test_adaptation_turn_eval_estimation_format_prompt_includes_both_estimates_once(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["eval_adaptation_turn"] = True
+    cfg.agent_proxy["eval_adaptation_turn_scope"] = [2, 5, 3]
+    cfg.agent_proxy["enable_think"] = True
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+    ctx.env_config_lookup = {0: {"max_tokens": 128, "env_tag": "CoordSokoban", "env_type": "sokoban"}}
+
+    format_prompt, _ = ctx._build_format_prompt(0)
+
+    assert format_prompt.count("<budget-thinking>") == 1
+    assert "<turn_estimation>" in format_prompt
+    assert "<token_estimation>" in format_prompt
 
 
 def test_eval_compliance_omits_length_prompt_from_context(dummy_config):

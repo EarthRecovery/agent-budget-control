@@ -622,3 +622,23 @@ rollout 绑定其中一个固定的 `budget_toolcall_num`。
 - 含义：
   - `9`：mutation turn 及之前的 budget；
   - `5`：mutation turn 之后的 budget。
+
+
+
+## `agent_proxy.eval_adaptation_turn`
+
+当`agent_proxy.eval_adaptation_turn` 为True, agent 会读取`agent_proxy.eval_adaptation_turn_scope`  
+获得3个值，第一个值代表突变点，当运行在突变点之前的turn, agent 会要求按照第二个值为budget 也就是要模型在第二个值前完成任务。在突变点后，agent会要求在第三个值前完成任务
+
+假如agent_proxy.eval_adaptation_turn_scope 为[2,5,3]
+那么在第一，第二个turn, 模型会要求在5个turn以内完成任务
+在第三个turn及以后，模型会要求在3个turn以内完成任务
+你需要同步显示（也就是你已经花了多少个turn）
+这里都只是建议，而不是硬性截止，假如超出你需要提醒模型已经超出了budget, 直至max_turn
+在每个turn中，你需要让模型同步的做estimation, 也就是估算1. 你这个turn 要花多少token 2. 你觉得接下来还需要几个turn 才能完成任务
+在json输出中你也需要评估估算的准不准
+
+## `agent_proxy.eval_adaptation_turn_scope` 
+
+Example: [2,5,3]
+

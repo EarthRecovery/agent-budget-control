@@ -1,7 +1,7 @@
 #!/bin/bash
 # WebShop plain RL runner.
-# This script intentionally disables mixed turn/token budget training and
-# enforces running on exactly 4x A100 GPUs.
+# This script disables mixed turn/token budget training and is intended for
+# single-node launches such as 2xH100 sbatch jobs.
 
 set -euo pipefail
 
@@ -21,11 +21,15 @@ MODEL_PATH="Qwen/Qwen2.5-3B-Instruct"
 PROJECT_NAME="mixed-budget-training"
 ALGO="PPO"
 
-STEPS=200
+STEPS=100
 SAVE_FREQ=50
 MAX_TURN=9
-GPUS="${GPUS:-0,1,2,3}"
+ALLOCATED_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}"
+GPUS="${GPUS:-${ALLOCATED_CUDA_VISIBLE_DEVICES:-0,1}}"
+GPUS_EXPLICITLY_SET=0
 GPU_MEMORY_UTILIZATION=0.3
+MAX_MODEL_LEN="10000"
+MAX_NUM_BATCHED_TOKENS="10000"
 
 NUM_GROUPS=8
 GROUP_SIZE=16
@@ -38,25 +42,26 @@ PPO_MINI_BATCH_SIZE=32
 RUN_NAME=""
 LOGGER="['console','wandb']"
 OUTPUT_ROOT="logs/training"
-CHECKPOINT_ROOT="/projects/e32695/agent-budget-control/webshop-origin"
+CHECKPOINT_ROOT="${REPO_ROOT}/model_saving/webshop-origin"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/training/mixed-budget-training.sh [options]
+Usage: bash scripts/training/mixed-budget-training-webshop-origin.sh [options]
 
 Plain WebShop RL only:
   - mixed turn budget: disabled
   - mixed token budget: disabled
   - rollout filtering: top_p=1.0
-  - hardware requirement: exactly 4x A100
+  - recommended hardware: 2 GPUs (for example 2xH100)
 
 Options:
-  --gpus LIST                    Comma-separated GPU ids. Default: 0,1,2,3
-  --steps N                      Total training steps. Default: 400
-  --save-freq N                  Checkpoint save frequency. Default: 100
+  --gpus LIST                    Comma-separated GPU ids. Default: Slurm allocation or 0,1
+  --steps N                      Total training steps. Default: 200
+  --save-freq N                  Checkpoint save frequency. Default: 50
   --config NAME                  Hydra config name. Default: _6_webshop
   --model-path PATH              Model path. Default: Qwen/Qwen2.5-3B-Instruct
-  --project-name NAME            W&B/Ray project name. Default: basic_webshop_rl
+  --project-name NAME            W&B/Ray project name. Default: mixed-budget-training
   --algo NAME                    PPO or GRPO. Default: PPO
   --max-turn N                   agent_proxy.max_turn. Default: 9
   --num-groups N                 Train env groups. Default: 8
@@ -67,6 +72,9 @@ Options:
   --log-prob-micro-batch-size N  log_prob_micro_batch_size_per_gpu. Default: 1
   --ppo-mini-batch-size N        ppo_mini_batch_size. Default: 32
   --gpu-memory-utilization V     rollout gpu_memory_utilization. Default: 0.3
+  --max-model-len N              Override actor_rollout_ref.rollout.max_model_len
+  --max-num-batched-tokens N     Override actor_rollout_ref.rollout.max_num_batched_tokens
+  --checkpoint-root PATH         Checkpoint root. Default: model_saving/webshop-origin
   --run-name NAME                Explicit experiment name
   -h, --help                     Show this help
 EOF
@@ -94,7 +102,7 @@ model_tag() {
 }
 
 build_run_name() {
-    echo "webshop-basic-rl-${ALGO}-4xa100-$(model_tag)-${NUM_GROUPS}x${GROUP_SIZE}-turn${MAX_TURN}"
+    echo "webshop-origin-${ALGO}-${GPUS_PER_EXP}gpu-$(model_tag)-${NUM_GROUPS}x${GROUP_SIZE}-turn${MAX_TURN}-origin"
 }
 
 get_algo_overrides() {
@@ -126,64 +134,46 @@ query_gpu_name() {
     printf '%s\n' "$gpu_name"
 }
 
-assert_four_a100() {
-    local gpu_ids=()
-    IFS=',' read -r -a gpu_ids <<< "$GPUS"
-
-    if [ "${#gpu_ids[@]}" -ne 4 ]; then
-        echo "Error: this script requires exactly 4 GPUs, got '${GPUS}'." >&2
-        exit 1
-    fi
-
-    if ! command -v nvidia-smi >/dev/null 2>&1; then
-        echo "Error: nvidia-smi is required to verify 4x A100 hardware." >&2
-        exit 1
-    fi
-
-    local seen_ids=""
-    local gpu_id gpu_name expected_name=""
+detect_gpu_names() {
     DETECTED_GPU_NAMES=()
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        return
+    fi
+
+    local gpu_ids=()
+    local gpu_id gpu_name
+    IFS=',' read -r -a gpu_ids <<< "$GPUS"
     for gpu_id in "${gpu_ids[@]}"; do
         gpu_id="${gpu_id// /}"
-        if [[ ",${seen_ids}," == *",${gpu_id},"* ]]; then
-            echo "Error: duplicate GPU id '${gpu_id}' in '${GPUS}'." >&2
-            exit 1
-        fi
-        if [[ ! "$gpu_id" =~ ^[0-9]+$ ]]; then
-            echo "Error: GPU id '${gpu_id}' is not a non-negative integer." >&2
-            exit 1
-        fi
-        seen_ids="${seen_ids},${gpu_id}"
-
         gpu_name=$(query_gpu_name "$gpu_id")
-        if [ -z "$gpu_name" ]; then
-            echo "Error: failed to query GPU ${gpu_id} via nvidia-smi." >&2
-            exit 1
+        if [ -n "$gpu_name" ]; then
+            DETECTED_GPU_NAMES+=("$gpu_name")
         fi
-        case "$gpu_name" in
-            *A100*)
-                ;;
-            *)
-                echo "Error: GPU ${gpu_id} is '${gpu_name}', not an A100." >&2
-                exit 1
-                ;;
-        esac
-        if [ -z "$expected_name" ]; then
-            expected_name="$gpu_name"
-        elif [ "$gpu_name" != "$expected_name" ]; then
-            echo "Error: all 4 GPUs must be the same A100 model, got '${expected_name}' and '${gpu_name}'." >&2
-            exit 1
-        fi
-        DETECTED_GPU_NAMES+=("$gpu_name")
     done
+}
 
-    GPUS=$(IFS=,; echo "${gpu_ids[*]}")
+normalize_gpu_list() {
+    echo "${1// /}"
+}
+
+resolve_gpu_selection() {
+    GPUS=$(normalize_gpu_list "$GPUS")
+
+    if [ -n "${SLURM_JOB_ID:-}" ] && [ -n "$ALLOCATED_CUDA_VISIBLE_DEVICES" ]; then
+        local slurm_gpus
+        slurm_gpus=$(normalize_gpu_list "$ALLOCATED_CUDA_VISIBLE_DEVICES")
+        if [ "$GPUS_EXPLICITLY_SET" -eq 1 ] && [ "$GPUS" != "$slurm_gpus" ]; then
+            echo "Error: under Slurm, --gpus (${GPUS}) must match allocated CUDA_VISIBLE_DEVICES (${slurm_gpus}), or omit --gpus." >&2
+            exit 1
+        fi
+        GPUS="$slurm_gpus"
+    fi
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --gpus) GPUS="$2"; shift 2 ;;
-        --gpus=*) GPUS="${1#*=}"; shift ;;
+        --gpus) GPUS="$2"; GPUS_EXPLICITLY_SET=1; shift 2 ;;
+        --gpus=*) GPUS="${1#*=}"; GPUS_EXPLICITLY_SET=1; shift ;;
         --steps) STEPS="$2"; shift 2 ;;
         --steps=*) STEPS="${1#*=}"; shift ;;
         --save-freq) SAVE_FREQ="$2"; shift 2 ;;
@@ -214,6 +204,12 @@ while [ $# -gt 0 ]; do
         --ppo-mini-batch-size=*) PPO_MINI_BATCH_SIZE="${1#*=}"; shift ;;
         --gpu-memory-utilization) GPU_MEMORY_UTILIZATION="$2"; shift 2 ;;
         --gpu-memory-utilization=*) GPU_MEMORY_UTILIZATION="${1#*=}"; shift ;;
+        --max-model-len) MAX_MODEL_LEN="$2"; shift 2 ;;
+        --max-model-len=*) MAX_MODEL_LEN="${1#*=}"; shift ;;
+        --max-num-batched-tokens) MAX_NUM_BATCHED_TOKENS="$2"; shift 2 ;;
+        --max-num-batched-tokens=*) MAX_NUM_BATCHED_TOKENS="${1#*=}"; shift ;;
+        --checkpoint-root) CHECKPOINT_ROOT="$2"; shift 2 ;;
+        --checkpoint-root=*) CHECKPOINT_ROOT="${1#*=}"; shift ;;
         --run-name) RUN_NAME="$2"; shift 2 ;;
         --run-name=*) RUN_NAME="${1#*=}"; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -226,10 +222,11 @@ while [ $# -gt 0 ]; do
 done
 
 ALGO=$(normalize_algo "$ALGO")
-assert_four_a100
+resolve_gpu_selection
 
 IFS=',' read -r -a GPU_IDS <<< "$GPUS"
 GPUS_PER_EXP=${#GPU_IDS[@]}
+detect_gpu_names
 
 if [ -z "$RUN_NAME" ]; then
     RUN_NAME=$(build_run_name)
@@ -280,6 +277,14 @@ COMMON_OVERRIDES=(
     "agent_proxy.mixed_token_budget.mixed_budget=False"
 )
 
+if [ -n "$MAX_MODEL_LEN" ]; then
+    COMMON_OVERRIDES+=("actor_rollout_ref.rollout.max_model_len=${MAX_MODEL_LEN}")
+fi
+
+if [ -n "$MAX_NUM_BATCHED_TOKENS" ]; then
+    COMMON_OVERRIDES+=("actor_rollout_ref.rollout.max_num_batched_tokens=${MAX_NUM_BATCHED_TOKENS}")
+fi
+
 ALGO_OVERRIDES=()
 read -r -a ALGO_OVERRIDES <<< "$(get_algo_overrides "$ALGO")"
 
@@ -302,5 +307,10 @@ CMD=(
 printf 'Command:\n'
 printf '  %q' "${CMD[@]}"
 printf '\n'
+
+if [ "$PREFLIGHT_ONLY" = "1" ]; then
+    echo "Preflight only: command constructed successfully; skipping training launch."
+    exit 0
+fi
 
 CUDA_VISIBLE_DEVICES="$GPUS" "${CMD[@]}" 2>&1 | tee "$LOG_PATH"

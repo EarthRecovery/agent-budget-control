@@ -57,6 +57,40 @@ def make_multi_wrapper(tmp_path, *, start_group_index):
     return CtxManagerWrapper(config, DummyTokenizer())
 
 
+def make_adaptation_turn_wrapper(
+    tmp_path,
+    *,
+    start_group_index,
+    adaptation_scope=None,
+):
+    if adaptation_scope is None:
+        adaptation_scope = [2, 5, 3]
+    config = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "enable_ctx_wrapper": True,
+                "eval-estimation-single": False,
+                "eval-estimation-multi": False,
+                "eval_adaptation_turn": True,
+                "eval_adaptation_turn_scope": adaptation_scope,
+                "enable_think": True,
+                "max_turn": 6,
+            },
+            "output": {
+                "dir": str(tmp_path),
+                "filename": "adaptation_turn_api_eval.pkl",
+            },
+            "es_manager": {
+                "val": {
+                    "start_group_index": start_group_index,
+                    "group_size": 1,
+                }
+            },
+        }
+    )
+    return CtxManagerWrapper(config, DummyTokenizer())
+
+
 def make_toolcall_wrapper(
     tmp_path,
     *,
@@ -487,6 +521,33 @@ def test_multi_eval_estimation_records_budget_thinking_before_estimates(tmp_path
     assert turn_record["estimate_remaining_turn"] == 3
     assert turn_record["estimate_token"] == 64
     assert "estimate_turn" not in turn_record
+
+
+def test_adaptation_turn_records_budget_thinking_before_estimates(tmp_path):
+    wrapper = make_adaptation_turn_wrapper(tmp_path, start_group_index=0)
+    wrapper.turn_idx = 0
+    env_record = wrapper._ensure_env_record(0, group_id=0, uid=None)
+    turn_record = wrapper._ensure_turn_record(env_record, 1)
+    wrapper._pending_turn_records[(0, 1)] = turn_record
+
+    class DummyOutputs:
+        non_tensor_batch = {
+            "env_ids": [0],
+            "response_texts": [
+                (
+                    "Estimate the remaining budget.</budget-thinking>"
+                    "<turn_estimation>3</turn_estimation>"
+                    "<token_estimation>64</token_estimation>"
+                    "<think>Plan</think><answer>Right</answer>"
+                )
+            ],
+        }
+
+    wrapper._record_estimation_outputs(DummyOutputs())
+
+    assert turn_record["raw_response"].startswith("<budget-thinking>")
+    assert turn_record["estimate_remaining_turn"] == 3
+    assert turn_record["estimate_token"] == 64
 
 
 def test_toolcall_eval_estimation_records_action_point_estimates_and_clips_to_budget(tmp_path):
@@ -1148,6 +1209,141 @@ def test_eval_turn_compliance_prompt_uses_mutated_budget_after_threshold(tmp_pat
     assert "Mutation turn: 2." in prompt
     assert "Budget schedule: 9 before or at the mutation turn, 5 after the mutation turn." in prompt
     assert "You are 2 turn(s) away from this budget." in prompt
+
+
+def test_adaptation_turn_prompt_uses_active_budget_and_soft_guidance(tmp_path):
+    wrapper = make_adaptation_turn_wrapper(tmp_path, start_group_index=0)
+    wrapper.set_state(turn_idx=2, max_turn=7)
+    messages_list = [[{"role": "user", "content": "Question"}]]
+
+    wrapper._inject_eval_adaptation_turn_prompt(messages_list)
+
+    prompt = messages_list[0][0]["content"]
+    assert "[Turn Budget Adaptation]" in prompt
+    assert "Suggested budget turn: 3." in prompt
+    assert "Current turn: 3." in prompt
+    assert "Turns used so far: 3." in prompt
+    assert "Hard stop: max_turn 7." in prompt
+    assert "This is guidance only, not a hard cutoff." in prompt
+    assert "This is the last suggested budgeted turn." in prompt
+    assert "Adaptation schedule:" not in prompt
+
+
+def test_adaptation_turn_finalize_rollout_records_budget_and_accuracy_fields(tmp_path):
+    wrapper = make_adaptation_turn_wrapper(tmp_path, start_group_index=0)
+    wrapper.begin_rollout()
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "CoordSokoban",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": (
+                            "<budget-thinking>Budget</budget-thinking>"
+                            "<turn_estimation>4</turn_estimation>"
+                            "<token_estimation>20</token_estimation>"
+                            "<think>Plan</think><answer>Step1</answer>"
+                        ),
+                        "llm_response": "<think>Plan</think><answer>Step1</answer>",
+                        "actions": ["Right"],
+                        "reward": 0.0,
+                        "token_count": 21,
+                        "info": {"success": False},
+                    },
+                    {
+                        "state": "S2",
+                        "llm_raw_response": (
+                            "<budget-thinking>Budget</budget-thinking>"
+                            "<turn_estimation>3</turn_estimation>"
+                            "<token_estimation>24</token_estimation>"
+                            "<think>Plan</think><answer>Step2</answer>"
+                        ),
+                        "llm_response": "<think>Plan</think><answer>Step2</answer>",
+                        "actions": ["Down"],
+                        "reward": 0.0,
+                        "token_count": 24,
+                        "info": {"success": False},
+                    },
+                    {
+                        "state": "S3",
+                        "llm_raw_response": (
+                            "<budget-thinking>Budget</budget-thinking>"
+                            "<turn_estimation>2</turn_estimation>"
+                            "<token_estimation>18</token_estimation>"
+                            "<think>Plan</think><answer>Step3</answer>"
+                        ),
+                        "llm_response": "<think>Plan</think><answer>Step3</answer>",
+                        "actions": ["Left"],
+                        "reward": 0.0,
+                        "token_count": 19,
+                        "info": {"success": False},
+                    },
+                    {
+                        "state": "S4",
+                        "llm_raw_response": (
+                            "<budget-thinking>Budget</budget-thinking>"
+                            "<turn_estimation>1</turn_estimation>"
+                            "<token_estimation>22</token_estimation>"
+                            "<think>Plan</think><answer>Finish</answer>"
+                        ),
+                        "llm_response": "<think>Plan</think><answer>Finish</answer>",
+                        "actions": ["Up"],
+                        "reward": 1.0,
+                        "token_count": 22,
+                        "info": {"success": True},
+                    },
+                ],
+            },
+        ]
+    )
+
+    record = wrapper._estimation_records[0]
+    turns = record["turns"]
+    assert record["mode"] == "adaptation_turn"
+    assert record["eval_adaptation_turn_scope"] == [2, 5, 3]
+    assert record["adaptation_turn_mutation_turn"] == 2
+    assert record["adaptation_turn_budget_change"] == [5, 3]
+    assert record["adaptation_turn_limit"] == 3
+    assert record["within_adaptation_turn_limit"] is False
+    assert record["adaptation_turn_limit_delta"] == 1
+    assert record["success_within_adaptation_turn_limit"] is False
+
+    assert turns[0]["adaptation_turn_limit"] == 5
+    assert turns[0]["within_adaptation_turn_limit_so_far"] is True
+    assert turns[0]["estimate_token_diff"] == -1
+    assert turns[0]["estimate_token_abs_error"] == 1
+    assert turns[0]["estimate_token_exact_match"] is False
+    assert turns[0]["estimate_remaining_turn_diff"] == 0
+    assert turns[0]["estimate_remaining_turn_abs_error"] == 0
+    assert turns[0]["estimate_remaining_turn_exact_match"] is True
+    assert turns[2]["adaptation_turn_limit"] == 3
+    assert turns[2]["within_adaptation_turn_limit_so_far"] is True
+    assert turns[3]["adaptation_turn_limit"] == 3
+    assert turns[3]["turn_budget_distance"] == -1
+    assert turns[3]["exceeded_adaptation_turn_limit"] is True
+    assert "You have already exceeded the suggested budget by 1 turn(s)." in turns[3]["adaptation_instruction"]
+
+
+def test_adaptation_turn_requires_non_empty_scope(tmp_path):
+    try:
+        make_adaptation_turn_wrapper(tmp_path, start_group_index=0, adaptation_scope=[])
+    except ValueError as exc:
+        assert "eval_adaptation_turn_scope is empty" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for empty eval_adaptation_turn_scope")
+
+
+def test_adaptation_turn_requires_exactly_three_scope_values(tmp_path):
+    try:
+        make_adaptation_turn_wrapper(tmp_path, start_group_index=0, adaptation_scope=[2, 5])
+    except ValueError as exc:
+        assert "must contain exactly three integers" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for malformed eval_adaptation_turn_scope")
 
 
 def test_eval_turn_compliance_finalize_rollout_records_mutation_budget_fields(tmp_path):

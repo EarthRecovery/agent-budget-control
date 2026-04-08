@@ -1,0 +1,410 @@
+#!/bin/bash
+# WebShop training runner.
+# This temp script currently enables mixed turn budget [2,6] and disables
+# mixed token budget training.
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+cd "$REPO_ROOT"
+
+# The vendored VERL repo is laid out as <repo>/verl/verl, so add <repo>/verl
+# to PYTHONPATH unless the environment has already installed verl.
+VERL_PYTHON_ROOT="$REPO_ROOT/verl"
+if [ -d "$VERL_PYTHON_ROOT/verl" ]; then
+    export PYTHONPATH="$VERL_PYTHON_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
+CONFIG="_6_webshop"
+MODEL_PATH="Qwen/Qwen2.5-3B-Instruct"
+PROJECT_NAME="mixed-budget-training"
+ALGO="PPO"
+
+STEPS=100
+SAVE_FREQ=50
+MAX_TURN=9
+ALLOCATED_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}"
+GPUS="${GPUS:-${ALLOCATED_CUDA_VISIBLE_DEVICES:-0,1}}"
+GPUS_EXPLICITLY_SET=0
+GPU_MEMORY_UTILIZATION=0.21
+GPU_MEMORY_UTILIZATION_MARGIN="${GPU_MEMORY_UTILIZATION_MARGIN:-0.02}"
+AUTO_ADJUST_GPU_MEMORY_UTILIZATION="${AUTO_ADJUST_GPU_MEMORY_UTILIZATION:-1}"
+MAX_MODEL_LEN="8000"
+MAX_NUM_BATCHED_TOKENS="8000"
+
+NUM_GROUPS=8
+GROUP_SIZE=16
+VAL_ENV_GROUPS=128
+VAL_GROUP_SIZE=1
+MICRO_BATCH_SIZE_PER_GPU=1
+LOG_PROB_MICRO_BATCH_SIZE_PER_GPU=1
+PPO_MINI_BATCH_SIZE=32
+
+RUN_NAME=""
+LOGGER="['console','wandb']"
+OUTPUT_ROOT="logs/training"
+CHECKPOINT_ROOT="/projects/bflz/agent-budget-control/agent-budget-control/webshop-origin"
+DETECTED_GPU_NAMES=()
+GPU_MEMORY_SUMMARY=()
+
+usage() {
+    cat <<'EOF'
+Usage: bash scripts/training/temp.sh [options]
+
+Current temp.sh behavior:
+  - mixed turn budget: enabled as [2,6]
+  - mixed token budget: disabled
+  - rollout filtering: top_p=1.0
+
+Options:
+  --gpus LIST                    Comma-separated GPU ids. Default: Slurm allocation or 0,1
+  --steps N                      Total training steps. Default: 100
+  --save-freq N                  Checkpoint save frequency. Default: 50
+  --config NAME                  Hydra config name. Default: _6_webshop
+  --model-path PATH              Model path. Default: Qwen/Qwen2.5-3B-Instruct
+  --project-name NAME            W&B/Ray project name. Default: mixed-budget-training
+  --algo NAME                    PPO or GRPO. Default: PPO
+  --max-turn N                   agent_proxy.max_turn. Default: 9
+  --num-groups N                 Train env groups. Default: 8
+  --group-size N                 Train group size. Default: 16
+  --val-env-groups N             Validation env groups. Default: 128
+  --val-group-size N             Validation group size. Default: 1
+  --micro-batch-size N           micro_batch_size_per_gpu. Default: 1
+  --log-prob-micro-batch-size N  log_prob_micro_batch_size_per_gpu. Default: 1
+  --ppo-mini-batch-size N        ppo_mini_batch_size. Default: 32
+  --gpu-memory-utilization V     rollout gpu_memory_utilization. Default: 0.3
+  --max-model-len N              Override actor_rollout_ref.rollout.max_model_len
+  --max-num-batched-tokens N     Override actor_rollout_ref.rollout.max_num_batched_tokens
+  --run-name NAME                Explicit experiment name
+  -h, --help                     Show this help
+EOF
+}
+
+normalize_algo() {
+    local value
+    value=$(echo "$1" | tr '[:lower:]' '[:upper:]')
+    case "$value" in
+        PPO|GRPO)
+            echo "$value"
+            ;;
+        *)
+            echo "Error: unsupported algo '$1'. Use PPO or GRPO." >&2
+            exit 1
+            ;;
+    esac
+}
+
+model_tag() {
+    local tag
+    tag=$(basename "$MODEL_PATH")
+    tag=${tag//\//-}
+    echo "$tag"
+}
+
+build_run_name() {
+    echo "webshop-temp-${ALGO}-${GPUS_PER_EXP}gpu-$(model_tag)-${NUM_GROUPS}x${GROUP_SIZE}-turn${MAX_TURN}"
+}
+
+get_algo_overrides() {
+    case "$1" in
+        PPO)
+            echo \
+                "algorithm.adv_estimator=gae" \
+                "actor_rollout_ref.actor.loss_agg_mode=token-mean"
+            ;;
+        GRPO)
+            echo \
+                "algorithm.adv_estimator=grpo" \
+                "algorithm.norm_adv_by_std_in_grpo=True" \
+                "actor_rollout_ref.actor.loss_agg_mode=seq-mean-token-mean"
+            ;;
+    esac
+}
+
+query_gpu_name() {
+    local gpu_id="$1"
+    local gpu_name=""
+    gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader -i "$gpu_id" 2>/dev/null || true)
+    gpu_name=$(printf '%s\n' "$gpu_name" | head -n 1 | tr -d '\r')
+    case "$gpu_name" in
+        NVIDIA-SMI\ has\ failed*)
+            gpu_name=""
+            ;;
+    esac
+    printf '%s\n' "$gpu_name"
+}
+
+query_gpu_memory_stats() {
+    local gpu_id="$1"
+    local stats=""
+    stats=$(nvidia-smi --query-gpu=memory.total,memory.free --format=csv,noheader,nounits -i "$gpu_id" 2>/dev/null || true)
+    stats=$(printf '%s\n' "$stats" | head -n 1 | tr -d '\r')
+    case "$stats" in
+        NVIDIA-SMI\ has\ failed*|"")
+            return 1
+            ;;
+    esac
+    printf '%s\n' "$stats"
+}
+
+detect_gpu_names() {
+    DETECTED_GPU_NAMES=()
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        return
+    fi
+
+    local gpu_id gpu_name
+    for gpu_id in "${GPU_IDS[@]}"; do
+        gpu_id="${gpu_id// /}"
+        gpu_name=$(query_gpu_name "$gpu_id")
+        if [ -n "$gpu_name" ]; then
+            DETECTED_GPU_NAMES+=("$gpu_name")
+        fi
+    done
+}
+
+normalize_gpu_list() {
+    echo "${1// /}"
+}
+
+resolve_gpu_selection() {
+    GPUS=$(normalize_gpu_list "$GPUS")
+
+    if [ -n "${SLURM_JOB_ID:-}" ] && [ -n "$ALLOCATED_CUDA_VISIBLE_DEVICES" ]; then
+        local slurm_gpus
+        slurm_gpus=$(normalize_gpu_list "$ALLOCATED_CUDA_VISIBLE_DEVICES")
+        if [ "$GPUS_EXPLICITLY_SET" -eq 1 ] && [ "$GPUS" != "$slurm_gpus" ]; then
+            echo "Error: under Slurm, --gpus (${GPUS}) must match allocated CUDA_VISIBLE_DEVICES (${slurm_gpus}), or omit --gpus." >&2
+            exit 1
+        fi
+        GPUS="$slurm_gpus"
+    fi
+}
+
+float_lt() {
+    awk -v lhs="$1" -v rhs="$2" 'BEGIN { exit !(lhs < rhs) }'
+}
+
+preflight_gpu_memory_utilization() {
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        return
+    fi
+
+    local gpu_id=""
+    local stats=""
+    local total_mib=""
+    local free_mib=""
+    local free_fraction=""
+    local free_gib=""
+    local total_gib=""
+    local min_free_fraction=""
+    local min_gpu_id=""
+    local min_free_gib=""
+    local min_total_gib=""
+    local safe_util=""
+
+    GPU_MEMORY_SUMMARY=()
+
+    for gpu_id in "${GPU_IDS[@]}"; do
+        gpu_id="${gpu_id// /}"
+        stats=$(query_gpu_memory_stats "$gpu_id") || continue
+        IFS=',' read -r total_mib free_mib <<< "$stats"
+        total_mib="${total_mib// /}"
+        free_mib="${free_mib// /}"
+
+        if [ -z "$total_mib" ] || [ -z "$free_mib" ]; then
+            continue
+        fi
+
+        free_fraction=$(awk -v free="$free_mib" -v total="$total_mib" 'BEGIN {
+            if (total <= 0) {
+                print "0.0000"
+            } else {
+                printf "%.4f", free / total
+            }
+        }')
+        free_gib=$(awk -v free="$free_mib" 'BEGIN { printf "%.2f", free / 1024 }')
+        total_gib=$(awk -v total="$total_mib" 'BEGIN { printf "%.2f", total / 1024 }')
+        GPU_MEMORY_SUMMARY+=("cuda:${gpu_id}=${free_gib}/${total_gib}GiB")
+
+        if [ -z "$min_free_fraction" ] || float_lt "$free_fraction" "$min_free_fraction"; then
+            min_free_fraction="$free_fraction"
+            min_gpu_id="$gpu_id"
+            min_free_gib="$free_gib"
+            min_total_gib="$total_gib"
+        fi
+    done
+
+    if [ -z "$min_free_fraction" ]; then
+        return
+    fi
+
+    safe_util=$(awk -v fraction="$min_free_fraction" -v margin="$GPU_MEMORY_UTILIZATION_MARGIN" 'BEGIN {
+        safe = fraction - margin
+        if (safe < 0.05) {
+            safe = 0.05
+        }
+        printf "%.3f", safe
+    }')
+
+    if float_lt "$safe_util" "$GPU_MEMORY_UTILIZATION"; then
+        if [ "$AUTO_ADJUST_GPU_MEMORY_UTILIZATION" = "1" ]; then
+            echo "Warning: rollout.gpu_memory_utilization=${GPU_MEMORY_UTILIZATION} is too high for current free GPU memory."
+            echo "  Tightest GPU cuda:${min_gpu_id}: ${min_free_gib}/${min_total_gib} GiB free."
+            echo "  Auto-adjusting rollout.gpu_memory_utilization to ${safe_util}."
+            echo "  If startup still fails later, also lower --max-model-len / --max-num-batched-tokens or choose emptier GPUs."
+            GPU_MEMORY_UTILIZATION="$safe_util"
+        else
+            echo "Error: rollout.gpu_memory_utilization=${GPU_MEMORY_UTILIZATION} exceeds current free GPU ratio on cuda:${min_gpu_id} (${min_free_gib}/${min_total_gib} GiB free)." >&2
+            echo "Try rerunning with: --gpu-memory-utilization ${safe_util}" >&2
+            echo "If that still fails later, also lower --max-model-len / --max-num-batched-tokens or choose emptier GPUs." >&2
+            exit 1
+        fi
+    fi
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --gpus) GPUS="$2"; GPUS_EXPLICITLY_SET=1; shift 2 ;;
+        --gpus=*) GPUS="${1#*=}"; GPUS_EXPLICITLY_SET=1; shift ;;
+        --steps) STEPS="$2"; shift 2 ;;
+        --steps=*) STEPS="${1#*=}"; shift ;;
+        --save-freq) SAVE_FREQ="$2"; shift 2 ;;
+        --save-freq=*) SAVE_FREQ="${1#*=}"; shift ;;
+        --config) CONFIG="$2"; shift 2 ;;
+        --config=*) CONFIG="${1#*=}"; shift ;;
+        --model-path) MODEL_PATH="$2"; shift 2 ;;
+        --model-path=*) MODEL_PATH="${1#*=}"; shift ;;
+        --project-name) PROJECT_NAME="$2"; shift 2 ;;
+        --project-name=*) PROJECT_NAME="${1#*=}"; shift ;;
+        --algo) ALGO=$(normalize_algo "$2"); shift 2 ;;
+        --algo=*) ALGO=$(normalize_algo "${1#*=}"); shift ;;
+        --max-turn) MAX_TURN="$2"; shift 2 ;;
+        --max-turn=*) MAX_TURN="${1#*=}"; shift ;;
+        --num-groups) NUM_GROUPS="$2"; shift 2 ;;
+        --num-groups=*) NUM_GROUPS="${1#*=}"; shift ;;
+        --group-size) GROUP_SIZE="$2"; shift 2 ;;
+        --group-size=*) GROUP_SIZE="${1#*=}"; shift ;;
+        --val-env-groups) VAL_ENV_GROUPS="$2"; shift 2 ;;
+        --val-env-groups=*) VAL_ENV_GROUPS="${1#*=}"; shift ;;
+        --val-group-size) VAL_GROUP_SIZE="$2"; shift 2 ;;
+        --val-group-size=*) VAL_GROUP_SIZE="${1#*=}"; shift ;;
+        --micro-batch-size) MICRO_BATCH_SIZE_PER_GPU="$2"; shift 2 ;;
+        --micro-batch-size=*) MICRO_BATCH_SIZE_PER_GPU="${1#*=}"; shift ;;
+        --log-prob-micro-batch-size) LOG_PROB_MICRO_BATCH_SIZE_PER_GPU="$2"; shift 2 ;;
+        --log-prob-micro-batch-size=*) LOG_PROB_MICRO_BATCH_SIZE_PER_GPU="${1#*=}"; shift ;;
+        --ppo-mini-batch-size) PPO_MINI_BATCH_SIZE="$2"; shift 2 ;;
+        --ppo-mini-batch-size=*) PPO_MINI_BATCH_SIZE="${1#*=}"; shift ;;
+        --gpu-memory-utilization) GPU_MEMORY_UTILIZATION="$2"; shift 2 ;;
+        --gpu-memory-utilization=*) GPU_MEMORY_UTILIZATION="${1#*=}"; shift ;;
+        --max-model-len) MAX_MODEL_LEN="$2"; shift 2 ;;
+        --max-model-len=*) MAX_MODEL_LEN="${1#*=}"; shift ;;
+        --max-num-batched-tokens) MAX_NUM_BATCHED_TOKENS="$2"; shift 2 ;;
+        --max-num-batched-tokens=*) MAX_NUM_BATCHED_TOKENS="${1#*=}"; shift ;;
+        --run-name) RUN_NAME="$2"; shift 2 ;;
+        --run-name=*) RUN_NAME="${1#*=}"; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+ALGO=$(normalize_algo "$ALGO")
+resolve_gpu_selection
+
+IFS=',' read -r -a GPU_IDS <<< "$GPUS"
+GPUS_PER_EXP=${#GPU_IDS[@]}
+detect_gpu_names
+preflight_gpu_memory_utilization
+
+if [ -z "$RUN_NAME" ]; then
+    RUN_NAME=$(build_run_name)
+fi
+
+TASK_LOG_DIR="${OUTPUT_ROOT}/${RUN_NAME}"
+LOG_PATH="${TASK_LOG_DIR}/train.log"
+CHECKPOINT_DIR="${CHECKPOINT_ROOT}/${RUN_NAME}"
+
+mkdir -p "$TASK_LOG_DIR"
+mkdir -p "$CHECKPOINT_DIR"
+
+COMMON_OVERRIDES=(
+    "model_path=${MODEL_PATH}"
+    "micro_batch_size_per_gpu=${MICRO_BATCH_SIZE_PER_GPU}"
+    "log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU}"
+    "ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE}"
+    "agent_proxy.max_turn=${MAX_TURN}"
+    "trainer.project_name=${PROJECT_NAME}"
+    "trainer.total_training_steps=${STEPS}"
+    "trainer.experiment_name=${RUN_NAME}"
+    "trainer.save_freq=${SAVE_FREQ}"
+    "trainer.default_local_dir=${CHECKPOINT_DIR}"
+    "trainer.logger=${LOGGER}"
+    "trainer.val_before_train=True"
+    "trainer.n_gpus_per_node=${GPUS_PER_EXP}"
+    "system.CUDA_VISIBLE_DEVICES='${GPUS}'"
+    "es_manager.train.env_groups=${NUM_GROUPS}"
+    "es_manager.train.group_size=${GROUP_SIZE}"
+    "es_manager.train.env_configs.n_groups=[${NUM_GROUPS}]"
+    "es_manager.val.env_groups=${VAL_ENV_GROUPS}"
+    "es_manager.val.group_size=${VAL_GROUP_SIZE}"
+    "es_manager.val.env_configs.n_groups=[${VAL_ENV_GROUPS}]"
+    "actor_rollout_ref.rollout.gpu_memory_utilization=${GPU_MEMORY_UTILIZATION}"
+    "actor_rollout_ref.rollout.rollout_filter_strategy=top_p"
+    "actor_rollout_ref.rollout.rollout_filter_value=1.0"
+    "actor_rollout_ref.rollout.rollout_filter_top_p_prob_mode=linear"
+    "actor_rollout_ref.rollout.rollout_filter_type=largest"
+    "actor_rollout_ref.rollout.rollout_filter_metric=reward_variance"
+    "actor_rollout_ref.rollout.rollout_filter_include_zero=True"
+    "actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU}"
+    "actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU}"
+    "actor_rollout_ref.actor.checkpoint.save_contents=[model]"
+    "critic.checkpoint.save_contents=[model]"
+    "agent_proxy.mixed_turn_budget.enabled=True"
+    "agent_proxy.mixed_turn_budget.mixed_budget=[2,6]"
+    "agent_proxy.mixed_token_budget.enabled=False"
+    "agent_proxy.mixed_token_budget.mixed_budget=False"
+)
+
+if [ -n "$MAX_MODEL_LEN" ]; then
+    COMMON_OVERRIDES+=("actor_rollout_ref.rollout.max_model_len=${MAX_MODEL_LEN}")
+fi
+
+if [ -n "$MAX_NUM_BATCHED_TOKENS" ]; then
+    COMMON_OVERRIDES+=("actor_rollout_ref.rollout.max_num_batched_tokens=${MAX_NUM_BATCHED_TOKENS}")
+fi
+
+ALGO_OVERRIDES=()
+read -r -a ALGO_OVERRIDES <<< "$(get_algo_overrides "$ALGO")"
+
+echo "Repo root: $REPO_ROOT"
+echo "Run name: $RUN_NAME"
+echo "Mode: mixed turn budget [2,6], mixed token budget disabled"
+echo "Algorithm: $ALGO"
+echo "GPUs: $GPUS"
+if [ ${#DETECTED_GPU_NAMES[@]} -gt 0 ]; then
+    echo "Detected GPUs: ${DETECTED_GPU_NAMES[*]}"
+fi
+if [ ${#GPU_MEMORY_SUMMARY[@]} -gt 0 ]; then
+    echo "GPU memory: ${GPU_MEMORY_SUMMARY[*]}"
+fi
+echo "Rollout gpu_memory_utilization: $GPU_MEMORY_UTILIZATION"
+echo "Checkpoint dir: $CHECKPOINT_DIR"
+echo "Log path: $LOG_PATH"
+
+CMD=(
+    python train.py
+    --config-name "$CONFIG"
+    "${COMMON_OVERRIDES[@]}"
+    "${ALGO_OVERRIDES[@]}"
+)
+
+printf 'Command:\n'
+printf '  %q' "${CMD[@]}"
+printf '\n'
+
+CUDA_VISIBLE_DEVICES="$GPUS" "${CMD[@]}" 2>&1 | tee "$LOG_PATH"

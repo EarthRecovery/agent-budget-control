@@ -147,7 +147,7 @@ class ContextManager:
 
     def _get_generation_prefix(self) -> str:
         eval_estimation_mode = self._get_eval_estimation_mode()
-        if eval_estimation_mode in {"single", "multi", "toolcall"}:
+        if eval_estimation_mode in {"single", "multi", "toolcall", "adaptation_turn"}:
             return "<budget-thinking>"
         if bool(getattr(self.config.agent_proxy, "enable_think", False)):
             return "<think>"
@@ -660,7 +660,7 @@ class ContextManager:
                 "<token_estimation> [Your estimated token count] </token_estimation> "
                 f"{answer_format}"
             )
-        elif eval_estimation_mode == "multi":
+        elif eval_estimation_mode in {"multi", "adaptation_turn"}:
             FORMAT_PROMPT = (
                 "<budget-thinking> [Your budget-related reasoning] </budget-thinking> "
                 "<turn_estimation> [Your estimated remaining turn count] </turn_estimation> "

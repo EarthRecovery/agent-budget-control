@@ -374,7 +374,7 @@ class LLMAgentProxy:
 
     def _get_generation_suffix(self) -> str:
         eval_estimation_mode = self._get_eval_estimation_mode()
-        if eval_estimation_mode in {"single", "multi", "toolcall"}:
+        if eval_estimation_mode in {"single", "multi", "toolcall", "adaptation_turn"}:
             return "<budget-thinking>"
         if bool(getattr(self.config.agent_proxy, "enable_think", False)):
             return "<think>"

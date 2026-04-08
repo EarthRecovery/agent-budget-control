@@ -147,6 +147,8 @@ agent_proxy:
   "eval-estimation-single": False
   "eval-estimation-multi": False
   "eval-estimation-toolcall": False
+  eval_adaptation_turn: False
+  eval_adaptation_turn_scope: []
   eval_compliance_token: False
   eval_compliance_token_scope: []
   eval_compliance_turn: False

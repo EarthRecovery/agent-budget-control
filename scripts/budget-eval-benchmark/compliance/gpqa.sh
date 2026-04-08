@@ -54,8 +54,8 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   model_config.api_batch_size=${API_BATCH_SIZE} \
   model_config.prompt_token_margin=${PROMPT_TOKEN_MARGIN} \
   model_config.api_connect_timeout_seconds=${API_CONNECT_TIMEOUT_SECONDS} \
-  output.dir="${OUTPUT_DIR}" \
-  output.filename="${RUN_NAME}.pkl" \
-  output.append_timestamp=True \
-  hydra.run.dir="${HYDRA_DIR}" \
-  hydra.output_subdir=null
+  "output.dir='${OUTPUT_DIR}'" \
+  "output.filename='${RUN_NAME}.pkl'" \
+  "output.append_timestamp=True" \
+  "hydra.run.dir='${HYDRA_DIR}'" \
+  "hydra.output_subdir=null"

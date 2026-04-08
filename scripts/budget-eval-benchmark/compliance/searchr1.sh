@@ -85,8 +85,8 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   actor_rollout_ref.rollout.max_num_batched_tokens=${MAX_BATCHED_TOKENS} \
   actor_rollout_ref.rollout.response_length=${MAX_TOKENS} \
   model_config.prompt_token_margin=${PROMPT_TOKEN_MARGIN} \
-  output.dir="${OUTPUT_DIR}" \
-  output.filename="${RUN_NAME}.pkl" \
-  output.append_timestamp=True \
-  hydra.run.dir="${HYDRA_DIR}" \
-  hydra.output_subdir=null
+  "output.dir='${OUTPUT_DIR}'" \
+  "output.filename='${RUN_NAME}.pkl'" \
+  "output.append_timestamp=True" \
+  "hydra.run.dir='${HYDRA_DIR}'" \
+  "hydra.output_subdir=null"
