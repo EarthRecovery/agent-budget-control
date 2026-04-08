@@ -21,7 +21,6 @@ import os
 
 import torch
 import torch.distributed
-from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
 from torch import nn, optim
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from verl import DataProto
@@ -43,6 +42,33 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
+index_first_axis = None
+pad_input = None
+rearrange = None
+unpad_input = None
+
+
+def _ensure_flash_attn_padding_ops():
+    global index_first_axis, pad_input, rearrange, unpad_input
+    if index_first_axis is not None:
+        return
+    try:
+        from flash_attn.bert_padding import index_first_axis as _index_first_axis
+        from flash_attn.bert_padding import pad_input as _pad_input
+        from flash_attn.bert_padding import rearrange as _rearrange
+        from flash_attn.bert_padding import unpad_input as _unpad_input
+    except ImportError as exc:
+        raise RuntimeError(
+            "flash_attn.bert_padding is required when critic use_remove_padding=True. "
+            "Disable use_remove_padding or install a flash-attn build compatible with this system."
+        ) from exc
+
+    index_first_axis = _index_first_axis
+    pad_input = _pad_input
+    rearrange = _rearrange
+    unpad_input = _unpad_input
+
+
 class DataParallelPPOCritic(BasePPOCritic):
     def __init__(self, config, critic_module: nn.Module, critic_optimizer: optim.Optimizer):
         super().__init__(config=config)
@@ -50,6 +76,8 @@ class DataParallelPPOCritic(BasePPOCritic):
         self.critic_optimizer = critic_optimizer
         self.use_remove_padding = self.config.model.get("use_remove_padding", False)
         print(f"Critic use_remove_padding={self.use_remove_padding}")
+        if self.use_remove_padding:
+            _ensure_flash_attn_padding_ops()
 
         self.ulysses_sequence_parallel_size = self.config.get("ulysses_sequence_parallel_size", 1)
 

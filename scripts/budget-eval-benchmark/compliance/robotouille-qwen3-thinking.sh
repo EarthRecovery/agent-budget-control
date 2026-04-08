@@ -10,7 +10,7 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
 MODEL_PATH=${MODEL_PATH:-/projects/e32695/Qwen3-32B}
-MODEL_TAG=${MODEL_TAG:-qwen3-32b-thinking-instance}
+MODEL_TAG=${MODEL_TAG:-qwen3-32b-thinking}
 CUDA_VISIBLE_DEVICES_VALUE=${CUDA_VISIBLE_DEVICES_VALUE:-0,1,2,3}
 NUM_GPUS=${NUM_GPUS:-4}
 TP_SIZE=${TP_SIZE:-4}
@@ -31,12 +31,12 @@ ROLLOUT_TOP_P=${ROLLOUT_TOP_P:-1.0}
 ROLLOUT_TOP_K=${ROLLOUT_TOP_K:--1}
 DRY_RUN=${DRY_RUN:-0}
 
-RUN_NAME=${RUN_NAME:-robotouille_qwen3_eval_estimation}
-VAL_GROUPS=${VAL_GROUPS:-512}
+RUN_NAME=${RUN_NAME:-robotouille_qwen3_eval_compliance}
+VAL_GROUPS=${VAL_GROUPS:-128}
 VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-0}
 VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-0}
-ENV_NAME=${ENV_NAME:-synchronous/5_double_cheeseburger}
-MAX_TURN=${MAX_TURN:-30}
+ENV_NAME=${ENV_NAME:-synchronous/4_cheeseburger}
+MAX_TURN=${MAX_TURN:-20}
 MAX_ACTIONS_PER_TURN=${MAX_ACTIONS_PER_TURN:-5}
 MAX_ACTIONS_PER_TRAJ=${MAX_ACTIONS_PER_TRAJ:-30}
 ENV_MAX_STEPS=${ENV_MAX_STEPS:-100}
@@ -46,9 +46,9 @@ MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-8192}
 PROMPT_TOKEN_MARGIN=${PROMPT_TOKEN_MARGIN:-1024}
 CONTEXT_WINDOW_MODE=${CONTEXT_WINDOW_MODE:-limited_multi_turn}
 MAX_CONTEXT_WINDOW=${MAX_CONTEXT_WINDOW:-3}
-MAX_ACTION_POINTS=${MAX_ACTION_POINTS:-30}
+MAX_ACTION_POINTS=${MAX_ACTION_POINTS:-25}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/budget-estimation-benchmark"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/robotouille-evaluation-toolcall-qwen3-32b-thinking-512-main"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/robotouille-new-compliance-toolcall-qwen3-32b-thinking-512-main"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 
 find_nvcc() {
@@ -110,7 +110,8 @@ cmd=(
   "agent_proxy.qwen_enable_thinking=True"
   "agent_proxy.eval-estimation-single=False"
   "agent_proxy.eval-estimation-multi=False"
-  "agent_proxy.eval-estimation-toolcall=True"
+  "agent_proxy.eval_compliance_toolcall=True"
+  "agent_proxy.eval_compliance_toolcall_scope=[5,10,15,20,25]"
   "agent_proxy.context_window_mode=${CONTEXT_WINDOW_MODE}"
   "agent_proxy.max_context_window=${MAX_CONTEXT_WINDOW}"
   "agent_proxy.max_turn=${MAX_TURN}"
@@ -122,6 +123,7 @@ cmd=(
   "es_manager.val.env_groups=${VAL_GROUPS}"
   "es_manager.val.group_size=1"
   "es_manager.val.start_group_index=${VAL_START_GROUP_INDEX}"
+  "+es_manager.val.rollout_chunk_size=${VAL_ROLLOUT_CHUNK_SIZE}"
   "es_manager.val.env_configs.tags=[Robotouille]"
   "es_manager.val.env_configs.n_groups=[${VAL_GROUPS}]"
   "custom_envs.Robotouille.env_instruction='You are controlling a kitchen robot. Choose between 1 and ${MAX_ACTIONS_PER_TURN} actions from the provided Valid Actions list for this turn. Think about the next state changes, then inside <answer> output only the exact action string or strings. If you choose multiple actions, separate them with ||, for example: action1 || action2. Do not output more than ${MAX_ACTIONS_PER_TURN} actions or any explanation inside <answer>.'"
@@ -143,7 +145,7 @@ cmd=(
   "hydra.output_subdir=null"
 )
 
-echo "==> Running Robotouille toolcall estimation with local Qwen3-32B thinking model at ${MODEL_PATH}"
+echo "==> Running Robotouille compliance with local Qwen3-32B instant model at ${MODEL_PATH}"
 if [[ "$DRY_RUN" == "1" ]]; then
   printf '%q ' "${cmd[@]}"
   printf '\n'

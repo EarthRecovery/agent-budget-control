@@ -69,7 +69,7 @@
             "direction": [0, -1]
         }
     ],
-    "goal_description": "Prepare a cheeseburger on a table",
+    "goal_description": "A cheeseburger is complete only if the final stack order is exactly: bottombun at the bottom, then patty, then cheese, then topbun on top.",
     "goal": [
         {
             "predicate": "item_on",
