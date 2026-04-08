@@ -19,17 +19,17 @@ fi
 CONFIG="_6_webshop"
 MODEL_PATH="Qwen/Qwen2.5-3B-Instruct"
 PROJECT_NAME="mixed-budget-training"
-ALGO="GRPO"
+ALGO="PPO"
 
 STEPS=100
 SAVE_FREQ=50
 MAX_TURN=7
 ALLOCATED_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}"
-GPUS="${GPUS:-${ALLOCATED_CUDA_VISIBLE_DEVICES:-0,1}}"
+GPUS="${GPUS:-${ALLOCATED_CUDA_VISIBLE_DEVICES:-0,1,2,3}}"
 GPUS_EXPLICITLY_SET=0
 GPU_MEMORY_UTILIZATION=0.3
-MAX_MODEL_LEN="8000"
-MAX_NUM_BATCHED_TOKENS="8000"
+MAX_MODEL_LEN="10000"
+MAX_NUM_BATCHED_TOKENS="10000"
 
 NUM_GROUPS=8
 GROUP_SIZE=16
@@ -39,13 +39,11 @@ MICRO_BATCH_SIZE_PER_GPU=1
 LOG_PROB_MICRO_BATCH_SIZE_PER_GPU=1
 PPO_MINI_BATCH_SIZE=32
 
-RUN_NAME="webshop-origin-grpo"
+RUN_NAME=""
 LOGGER="['console','wandb']"
 OUTPUT_ROOT="logs/training"
-CHECKPOINT_ROOT="${REPO_ROOT}/model_saving/webshop-origin"
+CHECKPOINT_ROOT="/projects/bflz/model_saving/webshop-origin"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
-CONTEXT_WINDOW_MODE=${CONTEXT_WINDOW_MODE:-limited_multi_turn}
-MAX_CONTEXT_WINDOW=${MAX_CONTEXT_WINDOW:-3}
 
 usage() {
     cat <<'EOF'
@@ -55,16 +53,16 @@ Plain WebShop RL only:
   - mixed turn budget: disabled
   - mixed token budget: disabled
   - rollout filtering: top_p=1.0
-  - recommended hardware: 2 GPUs (for example 2xH100)
+  - recommended hardware: 4 GPUs (for example 4xH100)
 
 Options:
-  --gpus LIST                    Comma-separated GPU ids. Default: Slurm allocation or 0,1
-  --steps N                      Total training steps. Default: 100
+  --gpus LIST                    Comma-separated GPU ids. Default: Slurm allocation or 0,1,2,3
+  --steps N                      Total training steps. Default: 200
   --save-freq N                  Checkpoint save frequency. Default: 50
   --config NAME                  Hydra config name. Default: _6_webshop
   --model-path PATH              Model path. Default: Qwen/Qwen2.5-3B-Instruct
   --project-name NAME            W&B/Ray project name. Default: mixed-budget-training
-  --algo NAME                    PPO or GRPO. Default: GRPO
+  --algo NAME                    PPO or GRPO. Default: PPO
   --max-turn N                   agent_proxy.max_turn. Default: 7
   --num-groups N                 Train env groups. Default: 8
   --group-size N                 Train group size. Default: 16
@@ -111,13 +109,11 @@ get_algo_overrides() {
     case "$1" in
         PPO)
             echo \
-                "critic.enable=True" \
                 "algorithm.adv_estimator=gae" \
                 "actor_rollout_ref.actor.loss_agg_mode=token-mean"
             ;;
         GRPO)
             echo \
-                "critic.enable=False" \
                 "algorithm.adv_estimator=grpo" \
                 "algorithm.norm_adv_by_std_in_grpo=True" \
                 "actor_rollout_ref.actor.loss_agg_mode=seq-mean-token-mean"
@@ -266,7 +262,7 @@ COMMON_OVERRIDES=(
     "es_manager.val.env_configs.n_groups=[${VAL_ENV_GROUPS}]"
     "actor_rollout_ref.rollout.gpu_memory_utilization=${GPU_MEMORY_UTILIZATION}"
     "actor_rollout_ref.rollout.rollout_filter_strategy=top_p"
-    "actor_rollout_ref.rollout.rollout_filter_value=0.9"
+    "actor_rollout_ref.rollout.rollout_filter_value=1.0"
     "actor_rollout_ref.rollout.rollout_filter_top_p_prob_mode=linear"
     "actor_rollout_ref.rollout.rollout_filter_type=largest"
     "actor_rollout_ref.rollout.rollout_filter_metric=reward_variance"
@@ -274,9 +270,6 @@ COMMON_OVERRIDES=(
     "actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU}"
     "actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU}"
     "actor_rollout_ref.actor.checkpoint.save_contents=[model]"
-    "+actor_rollout_ref.model.override_config.attn_implementation=sdpa"
-    "agent_proxy.context_window_mode=${CONTEXT_WINDOW_MODE}"
-    "agent_proxy.max_context_window=${MAX_CONTEXT_WINDOW}"
     "critic.checkpoint.save_contents=[model]"
     "agent_proxy.mixed_turn_budget.enabled=False"
     "agent_proxy.mixed_turn_budget.mixed_budget=False"
