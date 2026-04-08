@@ -710,6 +710,10 @@ def test_finalize_rollout_records_toolcall_action_point_fields(tmp_path):
     record = wrapper._estimation_records[0]
     turns = record["turns"]
     assert record["max_action_points"] == 6
+    assert record["success"] is True
+    assert record["final_reward"] == 1.0
+    assert record["final_reward_source"] == "rollout"
+    assert record["final_rollout_reward"] == 1.0
     assert turns[0]["estimate_remaining_action_points"] == 6
     assert turns[0]["estimate_remaining_action_points_to_finish"] == 6
     assert turns[0]["actual_remaining_action_points"] == 5
@@ -812,13 +816,81 @@ def test_finalize_rollout_prefers_goal_predicate_ratio_in_json_reward(tmp_path):
         ]
     )
 
-    turn = wrapper._estimation_records[0]["turns"][0]
+    record = wrapper._estimation_records[0]
+    turn = record["turns"][0]
+    assert record["success"] is True
+    assert record["final_reward"] == 0.4
+    assert record["final_reward_source"] == "goal_predicate_ratio"
+    assert record["final_rollout_reward"] == 1.0
+    assert record["final_goal_predicate_ratio_reward"] == 0.4
     assert turn["reward"] == 0.4
     assert turn["rollout_reward"] == 1.0
     assert turn["reward_source"] == "goal_predicate_ratio"
     assert turn["goal_predicates_satisfied"] == 2
     assert turn["goal_predicates_total"] == 5
     assert turn["goal_predicate_ratio_reward"] == 0.4
+
+
+def test_finalize_rollout_env_final_reward_keeps_last_goal_predicate_ratio(tmp_path):
+    wrapper = make_toolcall_wrapper(
+        tmp_path,
+        start_group_index=0,
+        max_action_points=6,
+    )
+    wrapper.begin_rollout()
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "Robotouille",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<answer>move</answer>",
+                        "llm_response": "<answer>move</answer>",
+                        "actions": ["move"],
+                        "reward": 1.0,
+                        "token_count": 16,
+                        "action_points_used": 1,
+                        "info": {
+                            "success": False,
+                            "goal_predicates_satisfied": 2,
+                            "goal_predicates_total": 4,
+                            "goal_predicate_ratio_reward": 0.5,
+                        },
+                    },
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<answer></answer>",
+                        "llm_response": "<answer></answer>",
+                        "actions": [],
+                        "reward": 0.0,
+                        "token_count": 4,
+                        "action_points_used": 0,
+                        "info": {"success": False},
+                    },
+                ],
+            }
+        ]
+    )
+
+    record = wrapper._estimation_records[0]
+    turns = record["turns"]
+    assert record["success"] is False
+    assert record["final_reward"] == 0.5
+    assert record["final_reward_source"] == "goal_predicate_ratio"
+    assert record["final_rollout_reward"] == 0.0
+    assert record["final_goal_predicate_ratio_reward"] == 0.5
+    assert turns[0]["reward"] == 0.5
+    assert turns[0]["reward_source"] == "goal_predicate_ratio"
+    assert turns[1]["reward"] == 0.5
+    assert turns[1]["rollout_reward"] == 0.0
+    assert turns[1]["reward_source"] == "goal_predicate_ratio_carry_forward"
+    assert turns[1]["goal_predicate_ratio_reward"] == 0.5
+    assert turns[1]["goal_predicates_satisfied"] == 2
+    assert turns[1]["goal_predicates_total"] == 4
 
 
 def test_eval_compliance_log_uses_compliance_suffix(tmp_path):

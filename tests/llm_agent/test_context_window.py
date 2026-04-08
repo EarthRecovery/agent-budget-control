@@ -509,3 +509,25 @@ def test_openai_reasoning_parse_response_requires_visible_think_tags(dummy_confi
 
     assert llm_response == "<think>Plan</think><answer>Right</answer>"
     assert actions == ["Right"]
+
+
+def test_parse_response_falls_back_to_answer_when_think_missing_in_toolcall_estimation(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["enable_think"] = True
+    cfg.agent_proxy["eval-estimation-single"] = False
+    cfg.agent_proxy["eval-estimation-multi"] = False
+    cfg.agent_proxy["eval-estimation-toolcall"] = True
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+
+    response = (
+        "<budget-thinking>Budget</budget-thinking>"
+        "<remaining_action_points_estimation>10</remaining_action_points_estimation>"
+        "<action_points_estimation>1</action_points_estimation>"
+        "<answer>Move robot1 from fryer1 to table1</answer>"
+    )
+    llm_response, actions = ctx._parse_response(response)
+
+    assert llm_response == "<think></think><answer>Move robot1 from fryer1 to table1</answer>"
+    assert actions == ["Move robot1 from fryer1 to table1"]

@@ -48,7 +48,7 @@ CONTEXT_WINDOW_MODE=${CONTEXT_WINDOW_MODE:-limited_multi_turn}
 MAX_CONTEXT_WINDOW=${MAX_CONTEXT_WINDOW:-3}
 MAX_ACTION_POINTS=${MAX_ACTION_POINTS:-30}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/budget-estimation-benchmark"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/robotouille-evaluation-toolcall-qwen3-32b-thinking-512-main"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/robotouille-evaluation-toolcall-qwen3-32b-instant-512-main"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 
 find_nvcc() {
@@ -107,7 +107,7 @@ cmd=(
   "actor_rollout_ref.rollout.val_kwargs.top_p=${ROLLOUT_TOP_P}"
   "actor_rollout_ref.rollout.val_kwargs.top_k=${ROLLOUT_TOP_K}"
   "agent_proxy.enable_think=True"
-  "agent_proxy.qwen_enable_thinking=True"
+  "agent_proxy.qwen_enable_thinking=False"
   "agent_proxy.eval-estimation-single=False"
   "agent_proxy.eval-estimation-multi=False"
   "agent_proxy.eval-estimation-toolcall=True"
@@ -151,3 +151,5 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 "${cmd[@]}"
+
+

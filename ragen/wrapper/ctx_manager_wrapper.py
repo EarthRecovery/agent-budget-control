@@ -460,6 +460,13 @@ class CtxManagerWrapper:
                 env_record["final_state"] = history[-1].get("state")
 
             rollout_success = False
+            final_reward = None
+            final_reward_source = None
+            final_rollout_reward = None
+            final_goal_predicate_ratio_reward = None
+            last_goal_predicate_ratio_reward = None
+            last_goal_predicates_satisfied = None
+            last_goal_predicates_total = None
             for turn_idx, turn in enumerate(reward_turns, start=1):
                 turn_record = self._ensure_turn_record(env_record, turn_idx)
                 turn_info = (turn.get("info", {}) or {}).copy()
@@ -501,6 +508,17 @@ class CtxManagerWrapper:
                 )
                 rollout_reward = turn.get("reward")
                 goal_ratio_reward = turn_info.get("goal_predicate_ratio_reward")
+                if goal_ratio_reward is not None:
+                    last_goal_predicate_ratio_reward = float(goal_ratio_reward)
+                effective_goal_ratio_reward = last_goal_predicate_ratio_reward
+                if "goal_predicates_satisfied" in turn_info:
+                    last_goal_predicates_satisfied = int(
+                        turn_info.get("goal_predicates_satisfied", 0) or 0
+                    )
+                if "goal_predicates_total" in turn_info:
+                    last_goal_predicates_total = int(
+                        turn_info.get("goal_predicates_total", 0) or 0
+                    )
 
                 turn_record["raw_response"] = llm_raw_response
                 turn_record["parsed_response"] = "" if generation_error else turn.get("llm_response")
@@ -509,22 +527,28 @@ class CtxManagerWrapper:
                 turn_record["action_names"] = turn_actions
                 turn_record["toolcalls_used"] = toolcalls_used
                 turn_record["reward"] = (
-                    float(goal_ratio_reward)
-                    if goal_ratio_reward is not None
+                    effective_goal_ratio_reward
+                    if effective_goal_ratio_reward is not None
                     else rollout_reward
                 )
-                if goal_ratio_reward is not None:
+                final_rollout_reward = rollout_reward
+                if effective_goal_ratio_reward is not None:
+                    final_goal_predicate_ratio_reward = effective_goal_ratio_reward
                     turn_record["rollout_reward"] = rollout_reward
-                    turn_record["reward_source"] = "goal_predicate_ratio"
+                    turn_record["reward_source"] = (
+                        "goal_predicate_ratio"
+                        if goal_ratio_reward is not None
+                        else "goal_predicate_ratio_carry_forward"
+                    )
                 turn_record["success"] = bool(turn_info.get("success", False))
                 rollout_success = rollout_success or bool(turn_record["success"])
                 turn_record["actual_token"] = actual_token
-                if "goal_predicates_satisfied" in turn_info:
-                    turn_record["goal_predicates_satisfied"] = int(turn_info.get("goal_predicates_satisfied", 0) or 0)
-                if "goal_predicates_total" in turn_info:
-                    turn_record["goal_predicates_total"] = int(turn_info.get("goal_predicates_total", 0) or 0)
-                if goal_ratio_reward is not None:
-                    turn_record["goal_predicate_ratio_reward"] = float(goal_ratio_reward)
+                if last_goal_predicates_satisfied is not None:
+                    turn_record["goal_predicates_satisfied"] = last_goal_predicates_satisfied
+                if last_goal_predicates_total is not None:
+                    turn_record["goal_predicates_total"] = last_goal_predicates_total
+                if effective_goal_ratio_reward is not None:
+                    turn_record["goal_predicate_ratio_reward"] = effective_goal_ratio_reward
                 turn_record["generation_error"] = generation_error
                 turn_record["generation_error_type"] = (
                     turn.get("llm_error_type") or turn_record.get("generation_error_type")
@@ -671,6 +695,22 @@ class CtxManagerWrapper:
                             int(compliance_toolcall_limit),
                             action_points_used_before_turn,
                         )
+
+            if final_goal_predicate_ratio_reward is not None:
+                final_reward = final_goal_predicate_ratio_reward
+                final_reward_source = "goal_predicate_ratio"
+            else:
+                final_reward = final_rollout_reward
+                final_reward_source = "rollout" if final_rollout_reward is not None else None
+
+            env_record["success"] = bool(rollout_success)
+            env_record["final_reward"] = final_reward
+            env_record["final_reward_source"] = final_reward_source
+            env_record["final_rollout_reward"] = final_rollout_reward
+            if final_goal_predicate_ratio_reward is not None:
+                env_record["final_goal_predicate_ratio_reward"] = (
+                    final_goal_predicate_ratio_reward
+                )
 
             if self._eval_compliance_turn_enabled():
                 env_turn_limit = self._get_eval_compliance_turn_limit_for_env(

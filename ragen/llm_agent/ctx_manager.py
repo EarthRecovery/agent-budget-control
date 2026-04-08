@@ -289,30 +289,40 @@ class ContextManager:
         return memory_manager
 
     def _parse_response(self, response: str) -> List:
-        pattern = r'<think>(.*?)</think>\s*<answer>(.*?)</answer>' if self.config.agent_proxy.enable_think else r'<answer>(.*?)</answer>'
-        match = re.search(pattern, response, re.DOTALL)
-        if not match:
-            # think_content, action_content, actions = "", "", [] # do not remove this kind of invalid string
-            llm_response, actions = response, []
-        else:
-            if self.config.agent_proxy.enable_think:
+        think_content = ""
+        action_content = ""
+        if self.config.agent_proxy.enable_think:
+            match = re.search(r'<think>(.*?)</think>\s*<answer>(.*?)</answer>', response, re.DOTALL)
+            if match:
                 think_content, action_content = match.group(1), match.group(2)
             else:
-                think_content, action_content = "", match.group(1)
+                answer_match = re.search(r'<answer>(.*?)</answer>', response, re.DOTALL)
+                if answer_match:
+                    action_content = answer_match.group(1)
+                else:
+                    # think_content, action_content, actions = "", "", [] # do not remove this kind of invalid string
+                    llm_response, actions = response, []
+                    return llm_response, actions
+        else:
+            match = re.search(r'<answer>(.*?)</answer>', response, re.DOTALL)
+            if not match:
+                # think_content, action_content, actions = "", "", [] # do not remove this kind of invalid string
+                llm_response, actions = response, []
+                return llm_response, actions
+            action_content = match.group(1)
 
-                
-            for special_token in self.special_token_list:
-                action_content = action_content.replace(special_token, "").strip()
-                think_content = think_content.replace(special_token, "").strip()
-            
-            actions = [action.strip() for action in action_content.split(self.action_sep) if action.strip()]
-            max_actions = self.config.agent_proxy.max_actions_per_turn
+        for special_token in self.special_token_list:
+            action_content = action_content.replace(special_token, "").strip()
+            think_content = think_content.replace(special_token, "").strip()
 
-            if len(actions) > max_actions:
-                actions = actions[:max_actions] #Only the first MAX_ACTIONS actions are kept in the rollout.
-                action_content = (" " + self.action_sep + " ").join(actions)
+        actions = [action.strip() for action in action_content.split(self.action_sep) if action.strip()]
+        max_actions = self.config.agent_proxy.max_actions_per_turn
 
-            llm_response = f"<think>{think_content}</think><answer>{action_content}</answer>" if self.config.agent_proxy.enable_think else f"<answer>{action_content}</answer>"
+        if len(actions) > max_actions:
+            actions = actions[:max_actions] #Only the first MAX_ACTIONS actions are kept in the rollout.
+            action_content = (" " + self.action_sep + " ").join(actions)
+
+        llm_response = f"<think>{think_content}</think><answer>{action_content}</answer>" if self.config.agent_proxy.enable_think else f"<answer>{action_content}</answer>"
         return llm_response, actions
         
     def _normalize_score_tensor(self, score_tensor: torch.Tensor, env_outputs: List[Dict]) -> torch.Tensor:
