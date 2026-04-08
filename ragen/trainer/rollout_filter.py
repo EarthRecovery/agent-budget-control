@@ -212,6 +212,53 @@ class RolloutFilter:
             return torch.zeros((), device=values.device, dtype=values.dtype)
         return values[selected].mean()
 
+    @staticmethod
+    def _to_python_scalar(value):
+        if torch.is_tensor(value):
+            return value.item()
+        if isinstance(value, np.generic):
+            return value.item()
+        return value
+
+    def _expand_group_values_to_batch(
+        self,
+        batch: DataProto,
+        group_values: torch.Tensor,
+        group_ids_for_metrics: Optional[torch.Tensor],
+        group_size: int,
+    ) -> torch.Tensor:
+        if (
+            batch.non_tensor_batch is not None
+            and "group_ids" in batch.non_tensor_batch
+            and group_ids_for_metrics is not None
+        ):
+            batch_group_ids = batch.non_tensor_batch["group_ids"]
+            if torch.is_tensor(batch_group_ids):
+                batch_group_ids = batch_group_ids.detach().cpu().tolist()
+            else:
+                batch_group_ids = np.asarray(batch_group_ids).tolist()
+
+            if torch.is_tensor(group_ids_for_metrics):
+                group_ids_for_metrics = group_ids_for_metrics.detach().cpu().tolist()
+            else:
+                group_ids_for_metrics = np.asarray(group_ids_for_metrics).tolist()
+
+            value_map = {
+                self._to_python_scalar(group_id): group_values[idx].item()
+                for idx, group_id in enumerate(group_ids_for_metrics)
+            }
+            sample_values = [
+                value_map[self._to_python_scalar(group_id)]
+                for group_id in batch_group_ids
+            ]
+            return torch.tensor(
+                sample_values,
+                dtype=group_values.dtype,
+                device=group_values.device,
+            )
+
+        return group_values.repeat_interleave(group_size)
+
     def _build_base_metrics(
         self,
         in_group_std: torch.Tensor,
@@ -456,9 +503,12 @@ class RewardRolloutFilter(RolloutFilter):
         metrics["rollout/_selected_group_ids"] = group_ids_for_metrics[top_groups].detach().cpu()
 
         if self.strategy == "top_p" and self.config.value >= 1 and self.config.include_zero:
-            # Attach reward std to batch even if not filtering
-            reward_std_per_sample = in_group_std.unsqueeze(1).expand(-1, group_size).reshape(-1)
-            batch.batch["reward_std"] = reward_std_per_sample
+            batch.batch["reward_std"] = self._expand_group_values_to_batch(
+                batch=batch,
+                group_values=in_group_std,
+                group_ids_for_metrics=group_ids_for_metrics,
+                group_size=group_size,
+            )
             return batch, metrics
 
         if has_episode_ids:
@@ -481,21 +531,12 @@ class RewardRolloutFilter(RolloutFilter):
 
         batch = self._apply_mask(batch, mask)
 
-        # Re-compute reward std for kept samples to ensure alignment
-        # Note: The actor will receive the filtered batch, so we need to attach the info here.
-        # Ideally we want the ORIGINAL group std, not the filtered one (which might be 0 if single sample kept).
-        # We broadcast the original in_group_std to the original batch size, then apply the mask.
-        reward_std_per_sample = in_group_std.unsqueeze(1).expand(-1, group_size).reshape(-1)
-        
-        # Apply the same mask to the reward_std tensor
-        if has_episode_ids:
-             # Mask is already boolean of shape (batch_size,)
-             reward_std_filtered = reward_std_per_sample[mask]
-        else:
-             # Mask is boolean of shape (batch_size,)
-             reward_std_filtered = reward_std_per_sample[mask]
-        
-        batch.batch["reward_std"] = reward_std_filtered
+        batch.batch["reward_std"] = self._expand_group_values_to_batch(
+            batch=batch,
+            group_values=in_group_std[top_groups],
+            group_ids_for_metrics=group_ids_for_metrics[top_groups],
+            group_size=group_size,
+        )
 
         return batch, metrics
 

@@ -17,6 +17,8 @@ def _ensure_robotouille_on_path():
 
 
 class RobotouilleEnv(BaseDiscreteActionEnv):
+    FINISH_ACTION = "Finish task"
+
     def __init__(self, config: RobotouilleEnvConfig = None):
         self.config = config or RobotouilleEnvConfig()
         self._env = None
@@ -138,8 +140,8 @@ class RobotouilleEnv(BaseDiscreteActionEnv):
 
     def _extract_valid_actions(self):
         if self._env is None:
-            self._last_valid_actions = []
-            self._last_action_names = {}
+            self._last_valid_actions = [self.FINISH_ACTION]
+            self._last_action_names = {self.FINISH_ACTION: "finish"}
             return
         valid_actions, str_valid_actions = self._env.current_state.get_valid_actions_and_str()
         if len(str_valid_actions) > self.config.max_action_space:
@@ -150,6 +152,18 @@ class RobotouilleEnv(BaseDiscreteActionEnv):
             action_str: action_def.name.strip().lower()
             for (action_def, _), action_str in zip(valid_actions, str_valid_actions)
         }
+        if self.FINISH_ACTION not in self._last_valid_actions:
+            self._last_valid_actions.append(self.FINISH_ACTION)
+        self._last_action_names[self.FINISH_ACTION] = "finish"
+
+    def _is_finish_action(self, action: Optional[str]) -> bool:
+        return isinstance(action, str) and action.strip() == self.FINISH_ACTION
+
+    def _is_goal_satisfied(self) -> bool:
+        total = int(self._count_total_goal_predicates())
+        if total <= 0:
+            return False
+        return int(self._count_goal_predicates()) >= total
 
     def reset(self, seed=None, mode=None):
         if seed is not None:
@@ -202,6 +216,31 @@ class RobotouilleEnv(BaseDiscreteActionEnv):
 
         action_name = self._get_action_name(chosen_action)
         action_cost = self._get_action_cost(action_name)
+
+        if self._is_finish_action(chosen_action):
+            self._action_count += 1
+            success = self._is_goal_satisfied()
+            info = {
+                "action_is_valid": True,
+                "action_is_effective": True,
+                "success": success,
+                "terminated_by_agent": True,
+            }
+            info.update(
+                self._build_budget_info(
+                    action_name=action_name,
+                    action_cost=action_cost,
+                    budget_exhausted=False,
+                )
+            )
+            info.update(self._build_goal_progress_info())
+            print(
+                f"Action {self._action_count}: {chosen_action} | reward=0.0 | "
+                f"action_cost={action_cost} | budget_remaining={info.get('budget_remaining')} | "
+                f"success={success}",
+                flush=True,
+            )
+            return self.render(), 0.0, True, info
 
         if self.config.enable_action_budget:
             remaining = 0 if self._budget_remaining is None else int(self._budget_remaining)

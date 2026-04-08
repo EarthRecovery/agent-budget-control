@@ -2,6 +2,10 @@
 
 This directory adds an optional action-point budget on top of the existing Robotouille wrapper in RAGEN.
 
+In addition to Robotouille's native actions, the wrapper always exposes a `Finish task`
+action. The agent can use it to end the episode early when it believes the task is
+complete or when it wants to stop.
+
 ## Config
 
 The Robotouille environment config now exposes two budget-related fields in [config.py](/home/bba1908/agent-budget-control/ragen/env/robotouille/config.py):
@@ -11,8 +15,14 @@ The Robotouille environment config now exposes two budget-related fields in [con
 
 ## Behavior
 
-- When `enable_action_budget=False`, Robotouille behaves exactly as before.
+- When `enable_action_budget=False`, Robotouille behaves like the base wrapper except
+  that `Finish task` is always available as an extra action.
 - When `enable_action_budget=True`, each valid Robotouille action consumes action points according to [action_costs.json](/home/bba1908/agent-budget-control/ragen/env/robotouille/action_costs.json).
+- `Finish task` is always appended to the valid-action list, even if the native action
+  list was truncated by `max_action_space`.
+- Choosing `Finish task` immediately ends the episode.
+- If the current state already satisfies the goal, `success=True`; otherwise the
+  episode ends as an early stop with `success=False`.
 - The remaining budget is appended to the rendered text observation as:
   - `Action Budget: enabled`
   - `Action Points Remaining: current/max`
@@ -34,6 +44,8 @@ The Robotouille environment config now exposes two budget-related fields in [con
 ## Action Cost Table
 
 Default per-action costs are stored in [action_costs.json](/home/bba1908/agent-budget-control/ragen/env/robotouille/action_costs.json). The JSON is keyed by Robotouille's internal action names such as `move`, `stack`, `cook`, and `wait`.
+
+The wrapper-specific `finish` action defaults to `0` action points.
 
 You can tune the budget system by editing:
 

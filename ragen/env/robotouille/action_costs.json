@@ -11,7 +11,8 @@
   "boil-water": 2,
   "add-to": 1,
   "fill-bowl": 2,
-  "stack": 1,
-  "unstack": 1,
-  "wait": 1
+  "stack": 2,
+  "unstack": 2,
+  "wait": 1,
+  "finish": 0
 }

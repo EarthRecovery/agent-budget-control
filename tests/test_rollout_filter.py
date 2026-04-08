@@ -66,6 +66,52 @@ def _make_reward_batch(num_groups: int, group_size: int, traj_len: int):
     return DataProto(batch=batch, non_tensor_batch=non_tensor_batch, meta_info={})
 
 
+def _make_turn_level_reward_batch():
+    episode_rewards = {
+        10: 1.0,
+        11: 3.0,
+        20: 2.0,
+        21: 6.0,
+    }
+    episode_turns = {
+        10: 3,
+        11: 1,
+        20: 2,
+        21: 2,
+    }
+    episode_group_ids = {
+        10: 0,
+        11: 0,
+        20: 1,
+        21: 1,
+    }
+
+    scores = []
+    episode_ids = []
+    group_ids = []
+    for episode_id, turns in episode_turns.items():
+        for _ in range(turns):
+            scores.append([episode_rewards[episode_id]])
+            episode_ids.append(episode_id)
+            group_ids.append(episode_group_ids[episode_id])
+
+    rm_scores = torch.tensor(scores, dtype=torch.float32)
+    loss_mask = torch.ones_like(rm_scores)
+    batch = TensorDict(
+        {
+            "original_rm_scores": rm_scores,
+            "loss_mask": loss_mask,
+        },
+        batch_size=[rm_scores.shape[0]],
+    )
+    non_tensor_batch = {
+        "uids": np.arange(rm_scores.shape[0]),
+        "episode_ids": np.array(episode_ids, dtype=int),
+        "group_ids": np.array(group_ids, dtype=int),
+    }
+    return DataProto(batch=batch, non_tensor_batch=non_tensor_batch, meta_info={})
+
+
 def test_reward_variance_filter_reduces_batch_size():
     num_groups, group_size, traj_len = 4, 2, 3
     batch = _make_reward_batch(num_groups, group_size, traj_len)
@@ -197,6 +243,48 @@ def test_reward_sum_metric_keeps_top_half_groups():
     assert torch.allclose(retained, expected)
     assert metrics["rollout/in_group_reward_sum"].item() == pytest.approx(6.0)
     assert metrics["rollout/chosen_in_group_reward_sum"].item() == pytest.approx(8.5)
+
+
+def test_turn_level_reward_filter_attaches_reward_std_without_filtering():
+    batch = _make_turn_level_reward_batch()
+    rollout_filter = RewardRolloutFilter(
+        RolloutFilterConfig(
+            value=1.0,
+            filter_type="largest",
+            num_groups=2,
+            group_size=2,
+            strategy="top_p",
+            include_zero=True,
+        )
+    )
+
+    filtered_batch, _ = rollout_filter.filter(batch)
+
+    reward_std = filtered_batch.batch["reward_std"]
+    assert reward_std.shape == torch.Size([8])
+    assert torch.allclose(reward_std[:4], reward_std[0].expand(4))
+    assert torch.allclose(reward_std[4:], reward_std[4].expand(4))
+
+
+def test_turn_level_reward_filter_attaches_reward_std_after_filtering():
+    batch = _make_turn_level_reward_batch()
+    rollout_filter = RewardRolloutFilter(
+        RolloutFilterConfig(
+            value=0.5,
+            filter_type="largest",
+            num_groups=2,
+            group_size=2,
+            strategy="top_k",
+        )
+    )
+
+    filtered_batch, _ = rollout_filter.filter(batch)
+
+    reward_std = filtered_batch.batch["reward_std"]
+    assert filtered_batch.batch["original_rm_scores"].shape[0] == 4
+    assert reward_std.shape == torch.Size([4])
+    assert np.all(filtered_batch.non_tensor_batch["group_ids"] == 1)
+    assert torch.allclose(reward_std, reward_std[0].expand(4))
 
 
 def test_build_rollout_filter_supports_reward_sum():
