@@ -14,7 +14,7 @@
   <a href="https://arxiv.org/abs/2604.06268"><img src="https://img.shields.io/badge/📄_V2_Paper-DC143C?style=for-the-badge&logoColor=white" alt="V2 Paper"></a>
   <a href="https://arxiv.org/abs/2504.20073"><img src="https://img.shields.io/badge/📄_v1_Paper-FF8C00?style=for-the-badge&logoColor=white" alt="v1 Paper"></a>
   <a href="https://ragen-ai.github.io/"><img src="https://img.shields.io/badge/📝_HomePage-FF5722?style=for-the-badge&logoColor=white" alt="Blog"></a>
-  <a href="https://ragen-doc.readthedocs.io/"><img src="https://img.shields.io/badge/📚_Documentation-4285F4?style=for-the-badge&logoColor=white" alt="Documentation"></a>
+  <!-- <a href="https://ragen-doc.readthedocs.io/"><img src="https://img.shields.io/badge/📚_Documentation-4285F4?style=for-the-badge&logoColor=white" alt="Documentation"></a> -->
   <a href="https://x.com/wzihanw/status/1915052871474712858"><img src="https://img.shields.io/badge/🔍_Post-34A853?style=for-the-badge&logoColor=white" alt="Post"></a>
   <a href="https://api.wandb.ai/links/zihanwang-ai-northwestern-university/a8er8l7b"><img src="https://img.shields.io/badge/🧪_Experiment_Log-AB47BC?style=for-the-badge&logoColor=white" alt="Experiment Log"></a>
 </p>
@@ -77,7 +77,7 @@ SNR-Adaptive Filtering uses reward variance as a lightweight proxy to select hig
 <details>
 <summary>Older updates</summary>
 
-**2025.5.8.** Official [Documentation](https://ragen-doc.readthedocs.io/) released.
+**2025.5.8.** Official [Documentation](https://ragen-doc.readthedocs.io/) released. NOTE: this document is now outdated.
 
 **2025.5.2.** A [tracking document](https://docs.google.com/document/d/1bg7obeiKTExuHHBl5uOiSpec5uLDZ2Tgvxy6li5pHX4/edit?usp=sharing) for logging minor codebase updates is released.
 
@@ -162,7 +162,7 @@ We are actively developing the next generation of RAGEN infrastructure and diagn
 - [Full Documentation](https://ragen-doc.readthedocs.io/) *(We will release an updated version soon.)*
 - [Rollout Filtering Guide](docs/guide_rollout_filtering.md)
 - [MI Metrics Reference](docs/reference_mutual_information_metrics.md)
-- Adding Custom Environments — Gym-compatible interface, see `config/envs.yaml` and [documentation](https://ragen-doc.readthedocs.io/)
+- Adding Custom Environments — Gym-compatible interface, see `config/envs.yaml`
 - Experiment reproduction: [Main Table](docs/experiment_main_table.md) | [Intervention Sweep](docs/experiment_intervention_sweep.md) | [FrozenLake](docs/experiment_frozen_lake_slipper_sweep.md) | [Sokoban Gradient](docs/experiment_sokoban_gradient_analysis.md) | [Search](docs/experiment_search.md) | [DeepCoder](docs/experiment_deepcoder.md) | [WebShop](docs/experiment_webshop_release.md)
 
 
