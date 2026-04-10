@@ -92,15 +92,22 @@ class EnvStateManager:
                     env_config = REGISTERED_ENV_CONFIGS[env_class](**cfg_template.env_config)
                 if raw_env_cfg.get("action_lookup") is None and "action_lookup" in raw_env_cfg:
                     env_config.action_lookup = None
-                env_obj = REGISTERED_ENVS[env_class](env_config)
                 budget_turn = self._init_budget_turn()
                 budget_token = self._init_budget_token()
+                budget_toolcall = self._init_budget_toolcall()
+                budget_toolcall = self._apply_mixed_toolcall_budget(
+                    tag=tag,
+                    env_class=env_class,
+                    env_config=env_config,
+                    budget_toolcall=budget_toolcall,
+                )
+                env_obj = REGISTERED_ENVS[env_class](env_config)
                 parallel_friendly = bool(getattr(cfg_template, "parallel_friendly", False))
                 max_workers = int(getattr(cfg_template, "max_workers", 1) or 1)
                 entry = {'tag': tag, 'group_id': env_id // self.group_size, 'env_id': env_id, 
                         'env': env_obj, 'config': env_config, 'status': EnvStatus(), 'max_actions_per_traj': max_actions_per_traj,
                         'parallel_friendly': parallel_friendly, 'max_workers': max_workers, 'budget_turn': budget_turn,
-                        'budget_token': budget_token}
+                        'budget_token': budget_token, 'budget_toolcall': budget_toolcall}
                 env_list.append(entry)
             done_groups += n_group
         return env_list
@@ -138,6 +145,43 @@ class EnvStateManager:
             if low > high:
                 low, high = high, low
         return random.randint(low, high)
+
+    def _init_budget_toolcall(self) -> Optional[int]:
+        budget_cfg = getattr(self.sys_config.agent_proxy, "mixed_toolcall_budget", None)
+        if budget_cfg is None or not getattr(budget_cfg, "enabled", False):
+            return None
+        if not getattr(budget_cfg, "mixed_budget", False):
+            return None
+        raw_range = getattr(budget_cfg, "mixed_budget_range", None)
+        if raw_range is None:
+            low, high = 0, 0
+        else:
+            low, high = int(raw_range[0]), int(raw_range[1])
+            if low > high:
+                low, high = high, low
+        return random.randint(low, high)
+
+    def _apply_mixed_toolcall_budget(
+        self,
+        *,
+        tag: str,
+        env_class: str,
+        env_config: Any,
+        budget_toolcall: Optional[int],
+    ) -> Optional[int]:
+        budget_cfg = getattr(self.sys_config.agent_proxy, "mixed_toolcall_budget", None)
+        if budget_cfg is None or not getattr(budget_cfg, "enabled", False):
+            return None
+        if env_class != "robotouille":
+            raise ValueError(
+                "agent_proxy.mixed_toolcall_budget can only be enabled for robotouille environments. "
+                f"Got tag={tag!r}, env_type={env_class!r}."
+            )
+        if budget_toolcall is None:
+            return None
+        env_config.enable_action_budget = True
+        env_config.max_action_points = int(budget_toolcall)
+        return int(budget_toolcall)
 
     def _register_parallel_executors(self):
         tag_seen: Dict[str, dict] = {}
@@ -177,6 +221,7 @@ class EnvStateManager:
                 "penalty": 0,
                 "budget_turn": entry.get("budget_turn"),
                 "budget_token": entry.get("budget_token"),
+                "budget_toolcall": entry.get("budget_toolcall"),
                 "turn_done": False,
             }
             for entry in envs

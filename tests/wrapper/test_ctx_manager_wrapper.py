@@ -141,6 +141,32 @@ def make_toolcall_wrapper(
     return CtxManagerWrapper(config, DummyTokenizer())
 
 
+def make_mixed_toolcall_budget_wrapper(tmp_path, *, start_group_index):
+    config = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "enable_ctx_wrapper": True,
+                "mixed_toolcall_budget": {
+                    "enabled": True,
+                    "mixed_budget": True,
+                    "mixed_budget_range": [3, 6],
+                },
+            },
+            "output": {
+                "dir": str(tmp_path),
+                "filename": "robotouille_mixed_toolcall_budget.pkl",
+            },
+            "es_manager": {
+                "val": {
+                    "start_group_index": start_group_index,
+                    "group_size": 1,
+                }
+            },
+        }
+    )
+    return CtxManagerWrapper(config, DummyTokenizer())
+
+
 def make_openai_reasoning_wrapper(tmp_path, *, start_group_index):
     config = OmegaConf.create(
         {
@@ -1474,6 +1500,24 @@ def test_eval_toolcall_compliance_prompt_uses_env_specific_limit_and_remaining_b
     assert "You can still use 3 action point(s) within this budget." in prompt
 
 
+def test_mixed_toolcall_budget_prompt_uses_budget_and_usage(tmp_path):
+    wrapper = make_mixed_toolcall_budget_wrapper(tmp_path, start_group_index=0)
+    messages_list = [[{"role": "user", "content": "Question"}]]
+
+    wrapper._inject_mixed_toolcall_budget_prompt(
+        messages_list,
+        budget_toolcalls=[5],
+        action_points_used_so_far=[2],
+    )
+
+    prompt = messages_list[0][0]["content"]
+    assert "[Toolcall Budget Guidance]" in prompt
+    assert "finish within 5 action points total" in prompt
+    assert "Action points used so far: 2." in prompt
+    assert "There are 3 action point(s) left within this budget." in prompt
+    assert "penalized if you finish after this budget" in prompt
+
+
 def test_eval_toolcall_compliance_limit_repeats_for_original_group_copies(tmp_path):
     wrapper = make_toolcall_compliance_wrapper(
         tmp_path,
@@ -1583,6 +1627,47 @@ def test_eval_toolcall_compliance_finalize_rollout_records_budget_fields(tmp_pat
     assert turns_1[1]["exceeded_toolcall_limit"] is True
     assert "Action points used so far: 2." in turns_1[1]["compliance_instruction"]
     assert "You can still use 2 action point(s) within this budget." in turns_1[1]["compliance_instruction"]
+
+
+def test_toolcall_eval_finalize_rollout_prefers_env_specific_budget_toolcall(tmp_path):
+    wrapper = make_toolcall_wrapper(
+        tmp_path,
+        start_group_index=0,
+        max_action_points=10,
+    )
+    wrapper.begin_rollout()
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "Robotouille",
+                "budget_toolcall": 4,
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<answer>move</answer>",
+                        "llm_response": "<answer>move</answer>",
+                        "actions": ["move"],
+                        "reward": 1.0,
+                        "token_count": 24,
+                        "action_points_used": 2,
+                        "info": {"success": True},
+                    },
+                ],
+            },
+        ]
+    )
+
+    record = wrapper._estimation_records[0]
+    turn = record["turns"][0]
+    assert record["budget_toolcall"] == 4
+    assert record["max_action_points"] == 4
+    assert turn["budget_toolcall"] == 4
+    assert turn["max_action_points"] == 4
+    assert turn["budget_remaining_before_turn"] == 4
+    assert turn["budget_remaining_after_turn"] == 2
 
 
 def test_eval_toolcall_compliance_requires_non_empty_scope(tmp_path):

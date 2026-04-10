@@ -352,6 +352,7 @@ class CtxManagerWrapper:
                     "max_action_points": record.get("max_action_points"),
                     "budget_turn": record.get("budget_turn"),
                     "budget_token": record.get("budget_token"),
+                    "budget_toolcall": record.get("budget_toolcall"),
                     "total_turns": record.get("total_turns"),
                     "within_turn_limit": record.get("within_turn_limit"),
                     "turn_limit_delta": record.get("turn_limit_delta"),
@@ -423,6 +424,12 @@ class CtxManagerWrapper:
             group_id = rollout_state.get("group_id")
             uid = rollout_state.get("uid")
             env_record = self._ensure_env_record(env_id, group_id=group_id, uid=uid)
+            mixed_toolcall_budget = rollout_state.get("budget_toolcall")
+            env_toolcall_cap = (
+                int(mixed_toolcall_budget)
+                if mixed_toolcall_budget is not None
+                else (int(toolcall_cap) if toolcall_cap is not None else None)
+            )
             compliance_token_limit = (
                 self._get_eval_compliance_token_limit_for_env(
                     env_id=env_id,
@@ -477,11 +484,12 @@ class CtxManagerWrapper:
                 env_record["eval_compliance_toolcall_scope"] = list(compliance_toolcall_scope)
             if compliance_toolcall_limit is not None:
                 env_record["compliance_toolcall_limit"] = compliance_toolcall_limit
-            if toolcall_cap is not None:
-                env_record["max_action_points"] = int(toolcall_cap)
+            if env_toolcall_cap is not None:
+                env_record["max_action_points"] = int(env_toolcall_cap)
             env_record["tag"] = rollout_state.get("tag")
             env_record["budget_turn"] = rollout_state.get("budget_turn")
             env_record["budget_token"] = rollout_state.get("budget_token")
+            env_record["budget_toolcall"] = mixed_toolcall_budget
 
             history = rollout_state.get("history", []) or []
             reward_turns = [turn for turn in history if "reward" in turn]
@@ -534,13 +542,13 @@ class CtxManagerWrapper:
                 cumulative_action_points_used = int(sum(reward_turn_action_points[:turn_idx]))
                 budget_remaining_before_turn = (
                     None
-                    if toolcall_cap is None
-                    else int(toolcall_cap) - action_points_used_before_turn
+                    if env_toolcall_cap is None
+                    else int(env_toolcall_cap) - action_points_used_before_turn
                 )
                 budget_remaining_after_turn = (
                     None
-                    if toolcall_cap is None
-                    else int(toolcall_cap) - cumulative_action_points_used
+                    if env_toolcall_cap is None
+                    else int(env_toolcall_cap) - cumulative_action_points_used
                 )
                 actual_remaining_action_points_to_finish = (
                     self._clip_action_point_value(
@@ -606,6 +614,8 @@ class CtxManagerWrapper:
                     else turn_record.get("generation_retryable")
                 )
                 turn_record["generation_success"] = generation_error is None
+                if mixed_toolcall_budget is not None:
+                    turn_record["budget_toolcall"] = int(mixed_toolcall_budget)
 
                 if eval_mode == "single":
                     turn_record["estimate_token"] = self._extract_token_estimate(llm_raw_response)
@@ -617,7 +627,7 @@ class CtxManagerWrapper:
                     turn_record["actual_remaining_turn"] = actual_remaining_turn
                 elif eval_mode == "toolcall":
                     turn_record["max_action_points"] = (
-                        int(toolcall_cap) if toolcall_cap is not None else None
+                        int(env_toolcall_cap) if env_toolcall_cap is not None else None
                     )
                     turn_record["estimate_remaining_action_points"] = (
                         self._extract_remaining_action_points_estimate(llm_raw_response)
@@ -1129,6 +1139,7 @@ class CtxManagerWrapper:
         group_ids = self._to_list(non_tensor_batch.get("group_ids"))
         uid_list = self._to_list(non_tensor_batch.get("uid"))
         action_points_used_so_far = self._to_list(non_tensor_batch.get("action_points_used_so_far"))
+        budget_toolcalls = self._to_list(non_tensor_batch.get("budget_toolcalls"))
         turn_idx = int(self.turn_idx + 1)
         toolcall_cap = self._get_toolcall_action_point_cap()
         adaptation_turn_cfg = self._get_eval_adaptation_turn_config()
@@ -1154,9 +1165,21 @@ class CtxManagerWrapper:
                 if idx < len(action_points_used_so_far) and action_points_used_so_far[idx] is not None
                 else 0
             )
+            budget_toolcall = (
+                int(budget_toolcalls[idx])
+                if idx < len(budget_toolcalls) and budget_toolcalls[idx] is not None
+                else None
+            )
+            effective_toolcall_cap = (
+                int(budget_toolcall)
+                if budget_toolcall is not None
+                else (int(toolcall_cap) if toolcall_cap is not None else None)
+            )
             env_record = self._ensure_env_record(env_id, group_id=group_id, uid=uid)
-            if toolcall_cap is not None:
-                env_record["max_action_points"] = int(toolcall_cap)
+            if budget_toolcall is not None:
+                env_record["budget_toolcall"] = int(budget_toolcall)
+            if effective_toolcall_cap is not None:
+                env_record["max_action_points"] = int(effective_toolcall_cap)
             if compliance_token_limit is not None:
                 env_record["compliance_token_limit"] = compliance_token_limit
                 env_record["eval_compliance_token_scope"] = list(
@@ -1254,8 +1277,10 @@ class CtxManagerWrapper:
                         int(adaptation_turn_limit),
                         int(turn_idx),
                     )
-            if toolcall_cap is not None:
-                turn_record["max_action_points"] = int(toolcall_cap)
+            if budget_toolcall is not None:
+                turn_record["budget_toolcall"] = int(budget_toolcall)
+            if effective_toolcall_cap is not None:
+                turn_record["max_action_points"] = int(effective_toolcall_cap)
             self._pending_turn_records[(int(env_id), turn_idx)] = turn_record
 
     def _decorate_response_for_estimation(self, raw_response: str) -> str:
@@ -1488,6 +1513,57 @@ class CtxManagerWrapper:
                         break
                     msg["content"] = content + ("\n" if content else "") + note
                     break
+
+    def _build_mixed_toolcall_budget_note(
+        self,
+        budget_toolcall: int,
+        action_points_used_so_far: int,
+    ) -> str:
+        remaining_action_points = int(budget_toolcall) - int(action_points_used_so_far)
+        if remaining_action_points > 0:
+            status = (
+                f"There are {remaining_action_points} action point(s) left within this budget."
+            )
+        elif remaining_action_points == 0:
+            status = (
+                "There are 0 action points left within this budget. Any additional tool call will exceed it."
+            )
+        else:
+            status = (
+                f"You have already exceeded this budget by {abs(remaining_action_points)} action point(s)."
+            )
+        return (
+            "[Toolcall Budget Guidance] "
+            f"You are expected to finish within {int(budget_toolcall)} action points total. "
+            f"Action points used so far: {int(action_points_used_so_far)}. "
+            f"{status} You will be penalized if you finish after this budget."
+        )
+
+    def _inject_mixed_toolcall_budget_prompt(
+        self,
+        messages_list: List[List[Dict]],
+        budget_toolcalls: List[Optional[int]],
+        action_points_used_so_far: Optional[List[Any]] = None,
+    ) -> None:
+        if action_points_used_so_far is None:
+            action_points_used_so_far = [0] * len(messages_list)
+        for idx, (messages, budget_toolcall) in enumerate(zip(messages_list, budget_toolcalls)):
+            if budget_toolcall is None:
+                continue
+            used_so_far = (
+                int(action_points_used_so_far[idx])
+                if idx < len(action_points_used_so_far) and action_points_used_so_far[idx] is not None
+                else 0
+            )
+            note = self._build_mixed_toolcall_budget_note(
+                int(budget_toolcall),
+                int(used_so_far),
+            )
+            self._append_note_to_last_user_message(
+                [messages],
+                note=note,
+                marker="[Toolcall Budget Guidance]",
+            )
 
     def _append_note_to_last_user_message(
         self,
@@ -1948,6 +2024,7 @@ class CtxManagerWrapper:
             lm_inputs.non_tensor_batch.get("action_points_used_so_far")
         )
         budget_turns = lm_inputs.non_tensor_batch.get("budget_turns")
+        budget_toolcalls = lm_inputs.non_tensor_batch.get("budget_toolcalls")
         if budget_turns is not None:
             budget_turns = (
                 budget_turns.tolist()
@@ -1955,6 +2032,17 @@ class CtxManagerWrapper:
                 else list(budget_turns)
             )
             self._inject_budget_prompt(messages_list, budget_turns)
+        if budget_toolcalls is not None:
+            budget_toolcalls = (
+                budget_toolcalls.tolist()
+                if hasattr(budget_toolcalls, "tolist")
+                else list(budget_toolcalls)
+            )
+            self._inject_mixed_toolcall_budget_prompt(
+                messages_list,
+                budget_toolcalls,
+                action_points_used_so_far,
+            )
 
         eval_mode = self._get_eval_estimation_mode()
         if eval_mode == "single":

@@ -482,6 +482,7 @@ class ContextManager:
         episode_ids: Optional[List[int]] = None,
         uid_list: Optional[List[Any]] = None,
         action_points_used_so_far: Optional[List[int]] = None,
+        budget_toolcalls: Optional[List[Optional[int]]] = None,
     ) -> DataProto:
         """Build DataProto with common structure for all modes."""
         llm_inputs = DataProto()
@@ -508,6 +509,8 @@ class ContextManager:
             non_tensor["uid"] = np.array(uid_list, dtype=object)
         if action_points_used_so_far is not None:
             non_tensor["action_points_used_so_far"] = np.array(action_points_used_so_far, dtype=int)
+        if budget_toolcalls is not None:
+            non_tensor["budget_toolcalls"] = np.array(budget_toolcalls, dtype=object)
 
         llm_inputs.non_tensor_batch = non_tensor
         return llm_inputs
@@ -1465,6 +1468,10 @@ class ContextManager:
             "messages_list": np.array(messages_list, dtype=object),
             "budget_turns": np.array(
                 [env_output.get("budget_turn") for env_output in env_outputs],
+                dtype=object,
+            ),
+            "budget_toolcalls": np.array(
+                [env_output.get("budget_toolcall") for env_output in env_outputs],
                 dtype=object,
             ),
             "action_points_used_so_far": np.array(action_points_used_so_far, dtype=int),

@@ -130,6 +130,48 @@ class EsManagerWrapper:
             turn["reward"] = float(scaled)
             turn["true_reward"] = float(turn["origin_reward"])
 
+    def _apply_toolcall_budget_curve(self, env_output: Dict) -> None:
+        budget_toolcall = env_output.get("budget_toolcall")
+        if budget_toolcall is None:
+            self._debug_reward(f"toolcall_curve_skip env_id={env_output.get('env_id')} reason=no_budget_toolcall")
+            return
+        budget_cfg = getattr(self.config.agent_proxy, "mixed_toolcall_budget", None)
+        if budget_cfg is None or not getattr(budget_cfg, "enabled", False):
+            self._debug_reward(f"toolcall_curve_skip env_id={env_output.get('env_id')} reason=toolcall_budget_disabled")
+            return
+        reward_curve = getattr(budget_cfg, "reward_curve", None)
+        tau = getattr(reward_curve, "tau", 1.0) if reward_curve is not None else 1.0
+        use_hard = getattr(reward_curve, "use_hard", False) if reward_curve is not None else False
+        self._debug_reward(
+            f"toolcall_curve_start env_id={env_output.get('env_id')}, budget_toolcall={budget_toolcall}, tau={tau}, use_hard={use_hard}"
+        )
+
+        history = env_output.get("history", [])
+        action_points_used = 0
+        for turn in history:
+            if "reward" not in turn:
+                continue
+            turn_action_points = turn.get("action_points_used")
+            if turn_action_points is None:
+                turn_action_points = turn.get("info", {}).get("budget_action_cost", 0)
+            action_points_used += max(0, int(turn_action_points or 0))
+            if "origin_reward" not in turn:
+                turn["origin_reward"] = float(turn["reward"])
+            scaled = self._cal_budget_reward(
+                turn["origin_reward"],
+                current_turn=action_points_used,
+                budget_turn=int(budget_toolcall),
+                tau=tau,
+                use_hard=use_hard,
+            )
+            self._debug_reward(
+                f"toolcall_curve env_id={env_output.get('env_id')}, action_points_used={action_points_used}, "
+                f"budget_toolcall={budget_toolcall}, success={turn.get('info', {}).get('success', None)}, "
+                f"origin_reward={float(turn['origin_reward']):.4f}, scaled_reward={float(scaled):.4f}"
+            )
+            turn["reward"] = float(scaled)
+            turn["true_reward"] = float(turn["origin_reward"])
+
     def _resolve_budget_range(self) -> Optional[Tuple[int, int]]:
         budget_cfg = getattr(self.config.agent_proxy, "mixed_turn_budget", None)
         if budget_cfg is None:
@@ -523,10 +565,12 @@ class EsManagerWrapper:
             f"n_reward_turns={sum(1 for turn in history if 'reward' in turn)}"
         )
 
-        budget_cfg = getattr(self.config.agent_proxy, "mixed_turn_budget", None)
-        budget_enabled = bool(getattr(budget_cfg, "enabled", False)) if budget_cfg else False
+        turn_budget_cfg = getattr(self.config.agent_proxy, "mixed_turn_budget", None)
+        toolcall_budget_cfg = getattr(self.config.agent_proxy, "mixed_toolcall_budget", None)
+        budget_enabled = bool(getattr(turn_budget_cfg, "enabled", False)) if turn_budget_cfg else False
+        toolcall_budget_enabled = bool(getattr(toolcall_budget_cfg, "enabled", False)) if toolcall_budget_cfg else False
         has_origin = any("origin_reward" in turn for turn in history)
-        if budget_enabled or has_origin:
+        if budget_enabled or toolcall_budget_enabled or has_origin:
             origin_sum = sum(float(turn.get("origin_reward", 0.0)) for turn in history)
             env_output["origin_reward_sum"] = float(origin_sum)
             self._debug_reward(
@@ -544,13 +588,16 @@ class EsManagerWrapper:
             last_turn = history[-2] if len(history) >= 2 else {}
             self._debug_reward(
                 f"pre_env env_id={env_output.get('env_id')}, budget_turn={env_output.get('budget_turn')}, "
-                f"budget_token={env_output.get('budget_token')}, last_reward={last_turn.get('reward', None)}, "
+                f"budget_token={env_output.get('budget_token')}, budget_toolcall={env_output.get('budget_toolcall')}, "
+                f"last_reward={last_turn.get('reward', None)}, "
                 f"last_success={last_turn.get('info', {}).get('success', None)}"
             )
             if env_output.get("budget_turn") is not None:
                 self._apply_budget_curve(env_output)
             if env_output.get("budget_token") is not None:
                 self._apply_token_budget_curve(env_output)
+            if env_output.get("budget_toolcall") is not None:
+                self._apply_toolcall_budget_curve(env_output)
             self.compute_benchmark_factors(env_output)
             benchmark_cfg = getattr(self.config.agent_proxy, "benchmark_factors", None)
             benchmark_enabled = bool(getattr(benchmark_cfg, "enabled", False)) if benchmark_cfg is not None else False

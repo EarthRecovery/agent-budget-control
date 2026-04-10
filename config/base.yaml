@@ -190,6 +190,13 @@ agent_proxy:
     reward_curve:
       use_hard: false
       tau: 1.0
+  mixed_toolcall_budget:
+    enabled: False
+    mixed_budget: false
+    mixed_budget_range: null
+    reward_curve:
+      use_hard: false
+      tau: 1.0
 
 # Collapse detection for diagnosing template collapse vs entropy collapse
 collapse_detection:

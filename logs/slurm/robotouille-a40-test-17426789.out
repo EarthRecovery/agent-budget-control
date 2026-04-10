@@ -1,0 +1,31 @@
+Wrapper start: 2026-04-08T19:18:33-05:00
+Initial PATH: /u/ylin30/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/u/ylin30/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/u/ylin30/.vscode-server/cli/servers/Stable-e7fb5e96c0730b9deb70b33781f98e2f35975036/server/bin/remote-cli:/sw/external/python/anaconda3/bin:/sw/external/python/anaconda3/condabin:/u/ylin30/.local/bin:/u/ylin30/bin:/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/cuda/12.8/compute-sanitizer:/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/cuda/12.8/bin:/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/cuda/12.8/libnvvp:/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/profilers/Nsight_Compute:/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/profilers/Nsight_Systems/bin:/opt/cray/pe/mpich/8.1.32/ofi/gnu/11.2/bin:/opt/cray/pe/mpich/8.1.32/bin:/opt/cray/libfabric/1.22.0/bin:/opt/cray/pe/craype/2.7.34/bin:/opt/rh/gcc-toolset-13/root/usr/bin:/sw/rh9.4/user/scripts:/sw/user/scripts:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/opt/puppetlabs/bin:/opt/cray/pe/bin:/u/ylin30/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/bundled/scripts/noConfigScripts
+Resolved CONDA_BASE: /sw/external/python/anaconda3
+W&B mode: online
+Host: gpub076.delta.ncsa.illinois.edu
+Job ID: 17426789
+CUDA_VISIBLE_DEVICES: 0
+Conda env: ragenv2
+Python: /u/ylin30/.conda/envs/ragenv2/bin/python
+WANDB_MODE: online
+PREFLIGHT_ONLY: 1
+TRAIN_MODE: origin
+TRAIN_SCRIPT: scripts/training/robotouille/mixed-budget-training-robotouille-origin.sh
+Python 3.12.9
+Python dependency check: hydra/omegaconf/ray/wandb OK
+Repo root: /u/ylin30/agent-budget-control
+Run name: robotouille-mixed-toolcall-PPO-1gpu-Qwen2.5-7B-Instruct-8x16-turn20-budget10to20-mixed
+Mode: mixed toolcall budget enabled, mixed turn budget disabled, mixed token budget disabled
+Robotouille env: synchronous/4_cheeseburger
+Context window mode: limited_multi_turn
+Max context window: 3
+Action budget cap: 25
+Mixed toolcall range: [10,20]
+Algorithm: PPO
+GPUs: 0
+Detected GPUs: NVIDIA A40
+Checkpoint dir: /projects/bflz/model_saving/robotouille-mixed-toolcall/robotouille-mixed-toolcall-PPO-1gpu-Qwen2.5-7B-Instruct-8x16-turn20-budget10to20-mixed
+Log path: logs/training/robotouille-mixed-toolcall-PPO-1gpu-Qwen2.5-7B-Instruct-8x16-turn20-budget10to20-mixed/train.log
+Command:
+  python  train.py  --config-name  _9_robotouille  model_path=Qwen/Qwen2.5-7B-Instruct  micro_batch_size_per_gpu=1  log_prob_micro_batch_size_per_gpu=1  ppo_mini_batch_size=32  agent_proxy.max_turn=20  agent_proxy.max_actions_per_turn=1  agent_proxy.context_window_mode=limited_multi_turn  agent_proxy.max_context_window=3  trainer.project_name=mixed-budget-training  trainer.total_training_steps=100  trainer.experiment_name=robotouille-mixed-toolcall-PPO-1gpu-Qwen2.5-7B-Instruct-8x16-turn20-budget10to20-mixed  trainer.save_freq=50  trainer.default_local_dir=/projects/bflz/model_saving/robotouille-mixed-toolcall/robotouille-mixed-toolcall-PPO-1gpu-Qwen2.5-7B-Instruct-8x16-turn20-budget10to20-mixed  trainer.logger=\[\'console\'\,\'wandb\'\]  trainer.val_before_train=True  trainer.n_gpus_per_node=1  system.CUDA_VISIBLE_DEVICES=\'0\'  es_manager.train.env_groups=8  es_manager.train.group_size=16  es_manager.train.env_configs.tags=\[Robotouille\]  es_manager.train.env_configs.n_groups=\[8\]  es_manager.val.env_groups=128  es_manager.val.group_size=1  es_manager.val.env_configs.tags=\[Robotouille\]  es_manager.val.env_configs.n_groups=\[128\]  actor_rollout_ref.rollout.gpu_memory_utilization=0.2  actor_rollout_ref.rollout.rollout_filter_strategy=top_p  actor_rollout_ref.rollout.rollout_filter_value=1.0  actor_rollout_ref.rollout.rollout_filter_top_p_prob_mode=linear  actor_rollout_ref.rollout.rollout_filter_type=largest  actor_rollout_ref.rollout.rollout_filter_metric=reward_variance  actor_rollout_ref.rollout.rollout_filter_include_zero=True  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1  actor_rollout_ref.actor.checkpoint.save_contents=\[model\]  critic.checkpoint.save_contents=\[model\]  agent_proxy.mixed_turn_budget.enabled=False  agent_proxy.mixed_turn_budget.mixed_budget=False  agent_proxy.mixed_token_budget.enabled=False  agent_proxy.mixed_token_budget.mixed_budget=False  agent_proxy.mixed_toolcall_budget.enabled=True  agent_proxy.mixed_toolcall_budget.mixed_budget=True  agent_proxy.mixed_toolcall_budget.mixed_budget_range=\[10\,20\]  agent_proxy.mixed_toolcall_budget.reward_curve.use_hard=False  agent_proxy.mixed_toolcall_budget.reward_curve.tau=1.0  custom_envs.Robotouille.env_instruction=\'You\ are\ controlling\ a\ kitchen\ robot.\ Choose\ between\ 1\ and\ 1\ actions\ from\ the\ provided\ Valid\ Actions\ list\ for\ this\ turn.\ Think\ about\ the\ next\ state\ changes\,\ then\ inside\ \<answer\>\ output\ only\ the\ exact\ action\ string\ or\ strings.\ If\ you\ choose\ multiple\ actions\,\ separate\ them\ with\ \|\|\,\ for\ example:\ action1\ \|\|\ action2.\ Do\ not\ output\ more\ than\ 1\ actions\ or\ any\ explanation\ inside\ \<answer\>.\'  ++custom_envs.Robotouille.env_config.env_name=synchronous/4_cheeseburger  ++custom_envs.Robotouille.env_config.max_steps=100  ++custom_envs.Robotouille.env_config.enable_action_budget=True  ++custom_envs.Robotouille.env_config.max_action_points=25  custom_envs.Robotouille.max_actions_per_traj=10  actor_rollout_ref.rollout.max_model_len=10000  actor_rollout_ref.rollout.max_num_batched_tokens=10000  algorithm.adv_estimator=gae  actor_rollout_ref.actor.loss_agg_mode=token-mean
+Preflight only: command constructed successfully; skipping training launch.

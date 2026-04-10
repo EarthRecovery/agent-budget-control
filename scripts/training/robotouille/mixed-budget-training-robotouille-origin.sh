@@ -1,12 +1,12 @@
 #!/bin/bash
-# WebShop training runner.
-# This temp script currently enables mixed turn budget [2,6] and disables
-# mixed token budget training.
+# Robotouille plain RL runner.
+# This script disables mixed toolcall/turn/token budget training and is intended
+# for single-node launches such as 4xH200 sbatch jobs.
 
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 cd "$REPO_ROOT"
 
 # The vendored VERL repo is laid out as <repo>/verl/verl, so add <repo>/verl
@@ -16,22 +16,27 @@ if [ -d "$VERL_PYTHON_ROOT/verl" ]; then
     export PYTHONPATH="$VERL_PYTHON_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 fi
 
-CONFIG="_6_webshop"
-MODEL_PATH="Qwen/Qwen2.5-3B-Instruct"
+CONFIG="_9_robotouille"
+MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
 PROJECT_NAME="mixed-budget-training"
 ALGO="PPO"
 
 STEPS=100
 SAVE_FREQ=50
-MAX_TURN=9
+MAX_TURN=20
+MAX_ACTIONS_PER_TURN=1
+MAX_ACTIONS_PER_TRAJ=10
+ENV_NAME="synchronous/4_cheeseburger"
+ENV_MAX_STEPS=100
+CONTEXT_WINDOW_MODE="limited_multi_turn"
+MAX_CONTEXT_WINDOW=3
+MAX_ACTION_POINTS=25
 ALLOCATED_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}"
-GPUS="${GPUS:-${ALLOCATED_CUDA_VISIBLE_DEVICES:-0,1}}"
+GPUS="${GPUS:-${ALLOCATED_CUDA_VISIBLE_DEVICES:-0,1,2,3}}"
 GPUS_EXPLICITLY_SET=0
-GPU_MEMORY_UTILIZATION=0.21
-GPU_MEMORY_UTILIZATION_MARGIN="${GPU_MEMORY_UTILIZATION_MARGIN:-0.02}"
-AUTO_ADJUST_GPU_MEMORY_UTILIZATION="${AUTO_ADJUST_GPU_MEMORY_UTILIZATION:-1}"
-MAX_MODEL_LEN="8000"
-MAX_NUM_BATCHED_TOKENS="8000"
+GPU_MEMORY_UTILIZATION=0.2
+MAX_MODEL_LEN="10000"
+MAX_NUM_BATCHED_TOKENS="10000"
 
 NUM_GROUPS=8
 GROUP_SIZE=16
@@ -44,28 +49,36 @@ PPO_MINI_BATCH_SIZE=32
 RUN_NAME=""
 LOGGER="['console','wandb']"
 OUTPUT_ROOT="logs/training"
-CHECKPOINT_ROOT="/projects/bflz/agent-budget-control/agent-budget-control/webshop-origin"
-DETECTED_GPU_NAMES=()
-GPU_MEMORY_SUMMARY=()
+CHECKPOINT_ROOT="/projects/bflz/model_saving/robotouille-origin"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/training/temp.sh [options]
+Usage: bash scripts/training/robotouille/mixed-budget-training-robotouille-origin.sh [options]
 
-Current temp.sh behavior:
-  - mixed turn budget: enabled as [2,6]
+Robotouille plain RL:
+  - mixed toolcall budget: disabled
+  - mixed turn budget: disabled
   - mixed token budget: disabled
-  - rollout filtering: top_p=1.0
+  - fixed action budget: enabled
+  - recommended hardware: 4 GPUs (for example 4xH200)
 
 Options:
-  --gpus LIST                    Comma-separated GPU ids. Default: Slurm allocation or 0,1
+  --gpus LIST                    Comma-separated GPU ids. Default: Slurm allocation or 0,1,2,3
   --steps N                      Total training steps. Default: 100
   --save-freq N                  Checkpoint save frequency. Default: 50
-  --config NAME                  Hydra config name. Default: _6_webshop
-  --model-path PATH              Model path. Default: Qwen/Qwen2.5-3B-Instruct
+  --config NAME                  Hydra config name. Default: _9_robotouille
+  --model-path PATH              Model path. Default: Qwen/Qwen2.5-7B-Instruct
   --project-name NAME            W&B/Ray project name. Default: mixed-budget-training
   --algo NAME                    PPO or GRPO. Default: PPO
-  --max-turn N                   agent_proxy.max_turn. Default: 9
+  --env-name NAME                Robotouille env name. Default: synchronous/4_cheeseburger
+  --env-max-steps N              Robotouille max steps. Default: 100
+  --context-window-mode MODE     agent_proxy.context_window_mode. Default: limited_multi_turn
+  --max-context-window N         agent_proxy.max_context_window. Default: 3
+  --max-action-points N          Fixed Robotouille action budget. Default: 25
+  --max-turn N                   agent_proxy.max_turn. Default: 20
+  --max-actions-per-turn N       agent_proxy.max_actions_per_turn. Default: 1
+  --max-actions-per-traj N       custom_envs.Robotouille.max_actions_per_traj. Default: 10
   --num-groups N                 Train env groups. Default: 8
   --group-size N                 Train group size. Default: 16
   --val-env-groups N             Validation env groups. Default: 128
@@ -73,9 +86,10 @@ Options:
   --micro-batch-size N           micro_batch_size_per_gpu. Default: 1
   --log-prob-micro-batch-size N  log_prob_micro_batch_size_per_gpu. Default: 1
   --ppo-mini-batch-size N        ppo_mini_batch_size. Default: 32
-  --gpu-memory-utilization V     rollout gpu_memory_utilization. Default: 0.3
+  --gpu-memory-utilization V     rollout gpu_memory_utilization. Default: 0.2
   --max-model-len N              Override actor_rollout_ref.rollout.max_model_len
   --max-num-batched-tokens N     Override actor_rollout_ref.rollout.max_num_batched_tokens
+  --checkpoint-root PATH         Checkpoint root. Default: /projects/bflz/model_saving/robotouille-origin
   --run-name NAME                Explicit experiment name
   -h, --help                     Show this help
 EOF
@@ -103,7 +117,7 @@ model_tag() {
 }
 
 build_run_name() {
-    echo "webshop-temp-${ALGO}-${GPUS_PER_EXP}gpu-$(model_tag)-${NUM_GROUPS}x${GROUP_SIZE}-turn${MAX_TURN}"
+    echo "robotouille-origin-${ALGO}-${GPUS_PER_EXP}gpu-$(model_tag)-${NUM_GROUPS}x${GROUP_SIZE}-turn${MAX_TURN}-budget${MAX_ACTION_POINTS}-origin"
 }
 
 get_algo_overrides() {
@@ -135,27 +149,16 @@ query_gpu_name() {
     printf '%s\n' "$gpu_name"
 }
 
-query_gpu_memory_stats() {
-    local gpu_id="$1"
-    local stats=""
-    stats=$(nvidia-smi --query-gpu=memory.total,memory.free --format=csv,noheader,nounits -i "$gpu_id" 2>/dev/null || true)
-    stats=$(printf '%s\n' "$stats" | head -n 1 | tr -d '\r')
-    case "$stats" in
-        NVIDIA-SMI\ has\ failed*|"")
-            return 1
-            ;;
-    esac
-    printf '%s\n' "$stats"
-}
-
 detect_gpu_names() {
     DETECTED_GPU_NAMES=()
     if ! command -v nvidia-smi >/dev/null 2>&1; then
         return
     fi
 
+    local gpu_ids=()
     local gpu_id gpu_name
-    for gpu_id in "${GPU_IDS[@]}"; do
+    IFS=',' read -r -a gpu_ids <<< "$GPUS"
+    for gpu_id in "${gpu_ids[@]}"; do
         gpu_id="${gpu_id// /}"
         gpu_name=$(query_gpu_name "$gpu_id")
         if [ -n "$gpu_name" ]; then
@@ -182,88 +185,6 @@ resolve_gpu_selection() {
     fi
 }
 
-float_lt() {
-    awk -v lhs="$1" -v rhs="$2" 'BEGIN { exit !(lhs < rhs) }'
-}
-
-preflight_gpu_memory_utilization() {
-    if ! command -v nvidia-smi >/dev/null 2>&1; then
-        return
-    fi
-
-    local gpu_id=""
-    local stats=""
-    local total_mib=""
-    local free_mib=""
-    local free_fraction=""
-    local free_gib=""
-    local total_gib=""
-    local min_free_fraction=""
-    local min_gpu_id=""
-    local min_free_gib=""
-    local min_total_gib=""
-    local safe_util=""
-
-    GPU_MEMORY_SUMMARY=()
-
-    for gpu_id in "${GPU_IDS[@]}"; do
-        gpu_id="${gpu_id// /}"
-        stats=$(query_gpu_memory_stats "$gpu_id") || continue
-        IFS=',' read -r total_mib free_mib <<< "$stats"
-        total_mib="${total_mib// /}"
-        free_mib="${free_mib// /}"
-
-        if [ -z "$total_mib" ] || [ -z "$free_mib" ]; then
-            continue
-        fi
-
-        free_fraction=$(awk -v free="$free_mib" -v total="$total_mib" 'BEGIN {
-            if (total <= 0) {
-                print "0.0000"
-            } else {
-                printf "%.4f", free / total
-            }
-        }')
-        free_gib=$(awk -v free="$free_mib" 'BEGIN { printf "%.2f", free / 1024 }')
-        total_gib=$(awk -v total="$total_mib" 'BEGIN { printf "%.2f", total / 1024 }')
-        GPU_MEMORY_SUMMARY+=("cuda:${gpu_id}=${free_gib}/${total_gib}GiB")
-
-        if [ -z "$min_free_fraction" ] || float_lt "$free_fraction" "$min_free_fraction"; then
-            min_free_fraction="$free_fraction"
-            min_gpu_id="$gpu_id"
-            min_free_gib="$free_gib"
-            min_total_gib="$total_gib"
-        fi
-    done
-
-    if [ -z "$min_free_fraction" ]; then
-        return
-    fi
-
-    safe_util=$(awk -v fraction="$min_free_fraction" -v margin="$GPU_MEMORY_UTILIZATION_MARGIN" 'BEGIN {
-        safe = fraction - margin
-        if (safe < 0.05) {
-            safe = 0.05
-        }
-        printf "%.3f", safe
-    }')
-
-    if float_lt "$safe_util" "$GPU_MEMORY_UTILIZATION"; then
-        if [ "$AUTO_ADJUST_GPU_MEMORY_UTILIZATION" = "1" ]; then
-            echo "Warning: rollout.gpu_memory_utilization=${GPU_MEMORY_UTILIZATION} is too high for current free GPU memory."
-            echo "  Tightest GPU cuda:${min_gpu_id}: ${min_free_gib}/${min_total_gib} GiB free."
-            echo "  Auto-adjusting rollout.gpu_memory_utilization to ${safe_util}."
-            echo "  If startup still fails later, also lower --max-model-len / --max-num-batched-tokens or choose emptier GPUs."
-            GPU_MEMORY_UTILIZATION="$safe_util"
-        else
-            echo "Error: rollout.gpu_memory_utilization=${GPU_MEMORY_UTILIZATION} exceeds current free GPU ratio on cuda:${min_gpu_id} (${min_free_gib}/${min_total_gib} GiB free)." >&2
-            echo "Try rerunning with: --gpu-memory-utilization ${safe_util}" >&2
-            echo "If that still fails later, also lower --max-model-len / --max-num-batched-tokens or choose emptier GPUs." >&2
-            exit 1
-        fi
-    fi
-}
-
 while [ $# -gt 0 ]; do
     case "$1" in
         --gpus) GPUS="$2"; GPUS_EXPLICITLY_SET=1; shift 2 ;;
@@ -280,8 +201,22 @@ while [ $# -gt 0 ]; do
         --project-name=*) PROJECT_NAME="${1#*=}"; shift ;;
         --algo) ALGO=$(normalize_algo "$2"); shift 2 ;;
         --algo=*) ALGO=$(normalize_algo "${1#*=}"); shift ;;
+        --env-name) ENV_NAME="$2"; shift 2 ;;
+        --env-name=*) ENV_NAME="${1#*=}"; shift ;;
+        --env-max-steps) ENV_MAX_STEPS="$2"; shift 2 ;;
+        --env-max-steps=*) ENV_MAX_STEPS="${1#*=}"; shift ;;
+        --context-window-mode) CONTEXT_WINDOW_MODE="$2"; shift 2 ;;
+        --context-window-mode=*) CONTEXT_WINDOW_MODE="${1#*=}"; shift ;;
+        --max-context-window) MAX_CONTEXT_WINDOW="$2"; shift 2 ;;
+        --max-context-window=*) MAX_CONTEXT_WINDOW="${1#*=}"; shift ;;
+        --max-action-points) MAX_ACTION_POINTS="$2"; shift 2 ;;
+        --max-action-points=*) MAX_ACTION_POINTS="${1#*=}"; shift ;;
         --max-turn) MAX_TURN="$2"; shift 2 ;;
         --max-turn=*) MAX_TURN="${1#*=}"; shift ;;
+        --max-actions-per-turn) MAX_ACTIONS_PER_TURN="$2"; shift 2 ;;
+        --max-actions-per-turn=*) MAX_ACTIONS_PER_TURN="${1#*=}"; shift ;;
+        --max-actions-per-traj) MAX_ACTIONS_PER_TRAJ="$2"; shift 2 ;;
+        --max-actions-per-traj=*) MAX_ACTIONS_PER_TRAJ="${1#*=}"; shift ;;
         --num-groups) NUM_GROUPS="$2"; shift 2 ;;
         --num-groups=*) NUM_GROUPS="${1#*=}"; shift ;;
         --group-size) GROUP_SIZE="$2"; shift 2 ;;
@@ -302,6 +237,8 @@ while [ $# -gt 0 ]; do
         --max-model-len=*) MAX_MODEL_LEN="${1#*=}"; shift ;;
         --max-num-batched-tokens) MAX_NUM_BATCHED_TOKENS="$2"; shift 2 ;;
         --max-num-batched-tokens=*) MAX_NUM_BATCHED_TOKENS="${1#*=}"; shift ;;
+        --checkpoint-root) CHECKPOINT_ROOT="$2"; shift 2 ;;
+        --checkpoint-root=*) CHECKPOINT_ROOT="${1#*=}"; shift ;;
         --run-name) RUN_NAME="$2"; shift 2 ;;
         --run-name=*) RUN_NAME="${1#*=}"; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -319,7 +256,6 @@ resolve_gpu_selection
 IFS=',' read -r -a GPU_IDS <<< "$GPUS"
 GPUS_PER_EXP=${#GPU_IDS[@]}
 detect_gpu_names
-preflight_gpu_memory_utilization
 
 if [ -z "$RUN_NAME" ]; then
     RUN_NAME=$(build_run_name)
@@ -332,12 +268,17 @@ CHECKPOINT_DIR="${CHECKPOINT_ROOT}/${RUN_NAME}"
 mkdir -p "$TASK_LOG_DIR"
 mkdir -p "$CHECKPOINT_DIR"
 
+ROBOTOUILLE_INSTRUCTION="You are controlling a kitchen robot. Choose between 1 and ${MAX_ACTIONS_PER_TURN} actions from the provided Valid Actions list for this turn. Think about the next state changes, then inside <answer> output only the exact action string or strings. If you choose multiple actions, separate them with ||, for example: action1 || action2. Do not output more than ${MAX_ACTIONS_PER_TURN} actions or any explanation inside <answer>."
+
 COMMON_OVERRIDES=(
     "model_path=${MODEL_PATH}"
     "micro_batch_size_per_gpu=${MICRO_BATCH_SIZE_PER_GPU}"
     "log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU}"
     "ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE}"
     "agent_proxy.max_turn=${MAX_TURN}"
+    "agent_proxy.max_actions_per_turn=${MAX_ACTIONS_PER_TURN}"
+    "agent_proxy.context_window_mode=${CONTEXT_WINDOW_MODE}"
+    "agent_proxy.max_context_window=${MAX_CONTEXT_WINDOW}"
     "trainer.project_name=${PROJECT_NAME}"
     "trainer.total_training_steps=${STEPS}"
     "trainer.experiment_name=${RUN_NAME}"
@@ -349,9 +290,11 @@ COMMON_OVERRIDES=(
     "system.CUDA_VISIBLE_DEVICES='${GPUS}'"
     "es_manager.train.env_groups=${NUM_GROUPS}"
     "es_manager.train.group_size=${GROUP_SIZE}"
+    "es_manager.train.env_configs.tags=[Robotouille]"
     "es_manager.train.env_configs.n_groups=[${NUM_GROUPS}]"
     "es_manager.val.env_groups=${VAL_ENV_GROUPS}"
     "es_manager.val.group_size=${VAL_GROUP_SIZE}"
+    "es_manager.val.env_configs.tags=[Robotouille]"
     "es_manager.val.env_configs.n_groups=[${VAL_ENV_GROUPS}]"
     "actor_rollout_ref.rollout.gpu_memory_utilization=${GPU_MEMORY_UTILIZATION}"
     "actor_rollout_ref.rollout.rollout_filter_strategy=top_p"
@@ -364,10 +307,18 @@ COMMON_OVERRIDES=(
     "actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU}"
     "actor_rollout_ref.actor.checkpoint.save_contents=[model]"
     "critic.checkpoint.save_contents=[model]"
-    "agent_proxy.mixed_turn_budget.enabled=True"
-    "agent_proxy.mixed_turn_budget.mixed_budget=[2,6]"
+    "agent_proxy.mixed_turn_budget.enabled=False"
+    "agent_proxy.mixed_turn_budget.mixed_budget=False"
     "agent_proxy.mixed_token_budget.enabled=False"
     "agent_proxy.mixed_token_budget.mixed_budget=False"
+    "agent_proxy.mixed_toolcall_budget.enabled=False"
+    "agent_proxy.mixed_toolcall_budget.mixed_budget=False"
+    "custom_envs.Robotouille.env_instruction='${ROBOTOUILLE_INSTRUCTION}'"
+    "++custom_envs.Robotouille.env_config.env_name=${ENV_NAME}"
+    "++custom_envs.Robotouille.env_config.max_steps=${ENV_MAX_STEPS}"
+    "++custom_envs.Robotouille.env_config.enable_action_budget=True"
+    "++custom_envs.Robotouille.env_config.max_action_points=${MAX_ACTION_POINTS}"
+    "custom_envs.Robotouille.max_actions_per_traj=${MAX_ACTIONS_PER_TRAJ}"
 )
 
 if [ -n "$MAX_MODEL_LEN" ]; then
@@ -383,16 +334,14 @@ read -r -a ALGO_OVERRIDES <<< "$(get_algo_overrides "$ALGO")"
 
 echo "Repo root: $REPO_ROOT"
 echo "Run name: $RUN_NAME"
-echo "Mode: mixed turn budget [2,6], mixed token budget disabled"
+echo "Mode: plain RL (mixed toolcall/turn/token budget disabled)"
+echo "Robotouille env: ${ENV_NAME}"
+echo "Context window mode: ${CONTEXT_WINDOW_MODE}"
+echo "Max context window: ${MAX_CONTEXT_WINDOW}"
+echo "Fixed action budget: ${MAX_ACTION_POINTS}"
 echo "Algorithm: $ALGO"
 echo "GPUs: $GPUS"
-if [ ${#DETECTED_GPU_NAMES[@]} -gt 0 ]; then
-    echo "Detected GPUs: ${DETECTED_GPU_NAMES[*]}"
-fi
-if [ ${#GPU_MEMORY_SUMMARY[@]} -gt 0 ]; then
-    echo "GPU memory: ${GPU_MEMORY_SUMMARY[*]}"
-fi
-echo "Rollout gpu_memory_utilization: $GPU_MEMORY_UTILIZATION"
+echo "Detected GPUs: ${DETECTED_GPU_NAMES[*]}"
 echo "Checkpoint dir: $CHECKPOINT_DIR"
 echo "Log path: $LOG_PATH"
 
@@ -406,5 +355,10 @@ CMD=(
 printf 'Command:\n'
 printf '  %q' "${CMD[@]}"
 printf '\n'
+
+if [ "$PREFLIGHT_ONLY" = "1" ]; then
+    echo "Preflight only: command constructed successfully; skipping training launch."
+    exit 0
+fi
 
 CUDA_VISIBLE_DEVICES="$GPUS" "${CMD[@]}" 2>&1 | tee "$LOG_PATH"
