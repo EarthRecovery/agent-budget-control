@@ -160,6 +160,7 @@ We are actively developing the next generation of RAGEN infrastructure and diagn
 ## Documentation
 
 - [Full Documentation](https://ragen-doc.readthedocs.io/) *(We will release an updated version soon.)*
+- [Evaluation Guide](docs/eval.md) — How to evaluate models and configure output formats
 - [Rollout Filtering Guide](docs/guide_rollout_filtering.md)
 - [MI Metrics Reference](docs/reference_mutual_information_metrics.md)
 - Adding Custom Environments — Gym-compatible interface, see `config/envs.yaml`

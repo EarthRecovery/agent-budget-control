@@ -342,6 +342,71 @@ def _build_save_path(config, output_cfg: Optional[Dict], timestamp: str) -> str:
     return os.path.join(output_dir, filename)
 
 
+def _save_as_jsonl(rollouts: DataProto, save_path: str) -> None:
+    """Save rollouts in OpenAI-compatible JSONL format."""
+    import json
+
+    def extract_openai_messages(history):
+        messages = []
+        for i, turn in enumerate(history):
+            if 'state' in turn:
+                state_content = turn['state']
+                if i == 0:
+                    messages.append({"role": "user", "content": state_content})
+                else:
+                    reward = turn.get('reward', 0)
+                    info_str = f" (reward: {reward})" if reward != 0 else ""
+                    messages.append({"role": "user", "content": f"{state_content}{info_str}"})
+
+            if 'llm_response' in turn:
+                llm_content = turn.get('llm_raw_response', turn.get('llm_response', ''))
+                if llm_content:
+                    messages.append({"role": "assistant", "content": str(llm_content)})
+        return messages
+
+    total = len(rollouts)
+    with open(save_path, 'w', encoding='utf-8') as f:
+        for idx in range(total):
+            try:
+                item = rollouts[idx]
+                ntb = item.non_tensor_batch or {}
+
+                history = ntb.get('history', [])
+                messages = extract_openai_messages(history)
+
+                rm_scores = item.batch.get('rm_scores') if item.batch else None
+                total_reward = float(np.sum(rm_scores)) if rm_scores is not None else 0.0
+
+                metadata = {
+                    "env_id": int(ntb.get('env_ids', idx)),
+                    "group_id": int(ntb.get('group_ids', 0)),
+                    "num_turns": len([h for h in history if 'actions' in h]),
+                    "total_reward": total_reward,
+                }
+
+                if 'metrics' in ntb:
+                    metrics = ntb['metrics']
+                    if isinstance(metrics, dict):
+                        metadata['success'] = metrics.get('success', False)
+                        metadata.update({k: v for k, v in metrics.items() if k != 'success'})
+
+                if 'entropys' in ntb:
+                    metadata['entropy'] = float(ntb['entropys'])
+                if 'n_generated_tokens' in ntb:
+                    metadata['n_tokens'] = int(ntb['n_generated_tokens'])
+
+                openai_obj = {
+                    "custom_id": f"traj_{idx}",
+                    "messages": messages,
+                    "metadata": metadata
+                }
+
+                f.write(json.dumps(openai_obj, ensure_ascii=False) + '\n')
+            except Exception as e:
+                print(f"Warning: Failed to convert trajectory {idx}: {e}")
+                continue
+
+
 @hydra.main(version_base=None, config_path="../../config", config_name="eval")
 def main(config):
     # detect config name from python -m ragen.llm_agent.agent_proxy --config_name frozen_lake
@@ -382,11 +447,31 @@ def main(config):
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     output_cfg = _normalize_output_cfg(config)
     save_path = _build_save_path(config, output_cfg, timestamp)
-    rollouts.save_to_disk(save_path)
-    dir_path = os.path.dirname(save_path)
-    print(
-        f"save validation results to {save_path}. To visualize, run: python scripts/visualize.py --rollout_path {dir_path}"
-    )
+
+    # Determine output format
+    output_format = output_cfg.get("format", "pkl") if output_cfg else "pkl"
+
+    if output_format == "jsonl":
+        # Save as JSONL
+        jsonl_path = save_path.replace('.pkl', '.jsonl')
+        _save_as_jsonl(rollouts, jsonl_path)
+        print(f"save validation results to {jsonl_path} (OpenAI-compatible JSONL format)")
+        # Also save pkl if requested
+        if output_cfg and output_cfg.get("save_pkl_backup", False):
+            rollouts.save_to_disk(save_path)
+            print(f"backup pkl saved to {save_path}")
+    else:
+        # Save as PKL (default)
+        rollouts.save_to_disk(save_path)
+        dir_path = os.path.dirname(save_path)
+        print(
+            f"save validation results to {save_path}. To visualize, run: python scripts/visualize.py --rollout_path {dir_path}"
+        )
+        # Also save jsonl if requested
+        if output_cfg and output_cfg.get("save_jsonl_backup", False):
+            jsonl_path = save_path.replace('.pkl', '.jsonl')
+            _save_as_jsonl(rollouts, jsonl_path)
+            print(f"backup jsonl saved to {jsonl_path}")
 
 
 if __name__ == "__main__":
