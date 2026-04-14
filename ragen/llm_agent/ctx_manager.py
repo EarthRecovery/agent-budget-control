@@ -93,6 +93,7 @@ class ContextManager:
         self.config = config
         self.tokenizer = tokenizer
         self.processor = processor
+        self.mode = mode
         self.action_sep = self.config.agent_proxy.action_sep
         self.special_token_list = ["<think>", "</think>", "<answer>", "</answer>", "<|im_start|>", "<|im_end|>"]
 
@@ -1375,18 +1376,19 @@ class ContextManager:
                     env_outputs, include_collapse_data=include_collapse_data
                 )
 
-            # Always save history and metrics to non_tensor_batch for evaluation/export
-            if result.non_tensor_batch is None:
-                result.non_tensor_batch = {}
+            # Save history and metrics only during evaluation (not training)
+            if self.mode == "val":
+                if result.non_tensor_batch is None:
+                    result.non_tensor_batch = {}
 
-            result.non_tensor_batch["history"] = np.array(
-                [env_output.get("history", []) for env_output in env_outputs],
-                dtype=object
-            )
-            result.non_tensor_batch["metrics"] = np.array(
-                [env_output.get("metrics", {}) for env_output in env_outputs],
-                dtype=object
-            )
+                result.non_tensor_batch["history"] = np.array(
+                    [env_output.get("history", []) for env_output in env_outputs],
+                    dtype=object
+                )
+                result.non_tensor_batch["metrics"] = np.array(
+                    [env_output.get("metrics", {}) for env_output in env_outputs],
+                    dtype=object
+                )
 
             return result
         else:
