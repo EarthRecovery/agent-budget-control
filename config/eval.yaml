@@ -115,7 +115,10 @@ ctx_manager:
 output:
   dir: results/eval
   filename: val_rollouts.pkl
+  format: pkl  # pkl | jsonl
   append_timestamp: true
+  save_jsonl_backup: false  # Save JSONL backup when format=pkl
+  save_pkl_backup: false    # Save PKL backup when format=jsonl
   keep_batch_keys: null
   keep_non_tensor_keys: null
   keep_meta_info: true

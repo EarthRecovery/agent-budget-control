@@ -94,6 +94,7 @@ class ContextManager:
         self.config = config
         self.tokenizer = tokenizer
         self.processor = processor
+        self.mode = mode
         self.action_sep = self.config.agent_proxy.action_sep
         self.special_token_list = [
             "<budget-thinking>",
@@ -1586,13 +1587,29 @@ class ContextManager:
         if prepare_for_update:
             # Training: dispatch to mode-specific builders
             if context_window_mode == "single_turn":
-                return self._build_single_turn_samples(env_outputs)
+                result = self._build_single_turn_samples(env_outputs)
             elif context_window_mode == "limited_multi_turn":
-                return self._build_limited_multi_turn_samples(env_outputs)
+                result = self._build_limited_multi_turn_samples(env_outputs)
             else:  # full
-                return self._build_samples_full(
+                result = self._build_samples_full(
                     env_outputs, include_collapse_data=include_collapse_data
                 )
+
+            # Save history and metrics only during evaluation (not training)
+            if self.mode == "val":
+                if result.non_tensor_batch is None:
+                    result.non_tensor_batch = {}
+
+                result.non_tensor_batch["history"] = np.array(
+                    [env_output.get("history", []) for env_output in env_outputs],
+                    dtype=object
+                )
+                result.non_tensor_batch["metrics"] = np.array(
+                    [env_output.get("metrics", {}) for env_output in env_outputs],
+                    dtype=object
+                )
+
+            return result
         else:
             # Inference: build prompts for generation
             return self._build_infer_samples(env_outputs)
