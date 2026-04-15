@@ -883,6 +883,14 @@ class CtxManagerWrapper:
                     rollout_success and within_toolcall_limit is True
                 )
 
+            if self._eval_estimation_enabled():
+                self._rewrite_completed_history_messages(
+                    sorted(
+                        env_record.get("turns", []),
+                        key=lambda item: int(item.get("turn_idx", 0) or 0),
+                    )
+                )
+
         self._pending_turn_records = {}
         self._write_estimation_log()
 
@@ -1032,6 +1040,57 @@ class CtxManagerWrapper:
             if msg.get("role") == "user":
                 return msg.get("content", "")
         return None
+
+    def _extract_first_system_message(self, messages: List[Dict[str, Any]]) -> Optional[str]:
+        for msg in messages:
+            if msg.get("role") == "system":
+                return msg.get("content", "")
+        return None
+
+    def _resolve_turn_user_prompt(self, turn_record: Dict[str, Any]) -> str:
+        user_prompt = turn_record.get("user_prompt")
+        if user_prompt is not None:
+            return str(user_prompt)
+        messages = turn_record.get("request_messages") or turn_record.get("messages") or []
+        extracted = self._extract_last_user_message(messages)
+        return "" if extracted is None else str(extracted)
+
+    def _resolve_turn_assistant_message(self, turn_record: Dict[str, Any]) -> str:
+        parsed_response = str(turn_record.get("parsed_response") or "").strip()
+        if parsed_response:
+            return parsed_response
+        return str(turn_record.get("raw_response") or "").strip()
+
+    def _extract_history_system_message(self, turns: List[Dict[str, Any]]) -> str:
+        for turn_record in turns:
+            messages = turn_record.get("request_messages") or turn_record.get("messages") or []
+            if not isinstance(messages, list):
+                continue
+            content = self._extract_first_system_message(messages)
+            if content is not None:
+                return str(content)
+        return ""
+
+    def _rewrite_completed_history_messages(self, turns: List[Dict[str, Any]]) -> None:
+        system_content = self._extract_history_system_message(turns)
+        for upto_idx, turn_record in enumerate(turns, start=1):
+            history_messages: List[Dict[str, str]] = []
+            if system_content:
+                history_messages.append({"role": "system", "content": system_content})
+            for completed_turn in turns[:upto_idx]:
+                history_messages.append(
+                    {
+                        "role": "user",
+                        "content": self._resolve_turn_user_prompt(completed_turn),
+                    }
+                )
+                history_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": self._resolve_turn_assistant_message(completed_turn),
+                    }
+                )
+            turn_record["messages"] = history_messages
 
     def _get_eval_compliance_limit_for_env(
         self,
@@ -1223,6 +1282,7 @@ class CtxManagerWrapper:
             turn_record = self._ensure_turn_record(env_record, turn_idx)
             turn_record["mode"] = self.mode
             turn_record["questions"] = self._build_eval_estimation_questions()
+            turn_record["request_messages"] = copy.deepcopy(messages)
             turn_record["messages"] = copy.deepcopy(messages)
             turn_record["user_prompt"] = self._extract_last_user_message(messages)
             turn_record["prompt_text"] = prompt_text

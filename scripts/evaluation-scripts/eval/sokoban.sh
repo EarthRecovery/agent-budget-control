@@ -4,6 +4,7 @@ eval "$(conda shell.bash hook)"
 conda activate ragenv2
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/agent-budget-control"}
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
@@ -47,9 +48,11 @@ esac
 RUN_NAME=${RUN_NAME:-sokoban-origin-gpt5.2-instant-238-main-new_gpt5.2-instant-token-estimation-test}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/${RUN_NAME}"}
-INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main-new/sokoban_api_eval_estimation_eval_estimation_dialogues.json"}
+INPUT_JSON=${INPUT_JSON:-}
 OUTPUT_JSON=${OUTPUT_JSON:-"$OUTPUT_DIR/${RUN_NAME}.json"}
 TEMP_JSON=${TEMP_JSON:-"$OUTPUT_DIR/${RUN_NAME}_pairs.json"}
+SYSTEM_PROMPT_FILE=${SYSTEM_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_system.txt"}
+USER_PROMPT_FILE=${USER_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_user.txt"}
 
 MAX_TURN=${MAX_TURN:-1}
 MAX_CONTEXT_WINDOW_TOKENS=${MAX_CONTEXT_WINDOW_TOKENS:-2500}
@@ -60,11 +63,14 @@ MAX_TOKENS=${MAX_TOKENS:-512}
 TEMPERATURE=${TEMPERATURE:-0.0}
 DRY_RUN=${DRY_RUN:-0}
 
-DEFAULT_RESULT_INPUT_JSON="$PROJECT_ROOT/results/budget-estimation-benchmark/searchr1-origin-gpt5.2-instant-128-window=1-max-turn=6/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
-DEFAULT_DATABASE_INPUT_JSON="/u/ylin30/database/origin-test/searchr1-origin-gpt5.2-instant-4-test3/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
+DEFAULT_RESULT_INPUT_JSON="$PROJECT_ROOT/results/estimation/sokoban-origin-gpt5.2-instant-128-main-new/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
+DEFAULT_BENCHMARK_INPUT_JSON="$PROJECT_ROOT/results/budget-estimation-benchmark/sokoban-origin-gpt5.2-instant-128-window=1-max-turn=6/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
+DEFAULT_DATABASE_INPUT_JSON="/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main-new/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
 if [[ -z "${INPUT_JSON:-}" ]]; then
   if [[ -f "$DEFAULT_RESULT_INPUT_JSON" ]]; then
     INPUT_JSON="$DEFAULT_RESULT_INPUT_JSON"
+  elif [[ -f "$DEFAULT_BENCHMARK_INPUT_JSON" ]]; then
+    INPUT_JSON="$DEFAULT_BENCHMARK_INPUT_JSON"
   else
     INPUT_JSON="$DEFAULT_DATABASE_INPUT_JSON"
   fi
@@ -72,6 +78,16 @@ fi
 
 if [[ ! -f "$INPUT_JSON" ]]; then
   echo "Input json not found: $INPUT_JSON" >&2
+  exit 1
+fi
+
+if [[ ! -f "$SYSTEM_PROMPT_FILE" ]]; then
+  echo "System prompt file not found: $SYSTEM_PROMPT_FILE" >&2
+  exit 1
+fi
+
+if [[ ! -f "$USER_PROMPT_FILE" ]]; then
+  echo "User prompt file not found: $USER_PROMPT_FILE" >&2
   exit 1
 fi
 
@@ -90,6 +106,8 @@ CMD=(
   --temperature "$TEMPERATURE"
   --max-turn "$MAX_TURN"
   --max-context-window-tokens "$MAX_CONTEXT_WINDOW_TOKENS"
+  --system-prompt-file "$SYSTEM_PROMPT_FILE"
+  --user-prompt-file "$USER_PROMPT_FILE"
 )
 
 if [[ -n "$REASONING_EFFORT" ]]; then

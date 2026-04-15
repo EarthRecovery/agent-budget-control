@@ -28,6 +28,7 @@ class TokenEstimationSample:
     target_output: str
     completed_turns: int
     completed_turn_token_usage: List[int]
+    completed_turn_token_usage_details: List[Dict[str, Optional[int]]]
     actual_tokens_used_so_far: int
     actual_can_finish: bool
     actual_remaining_turn: int
@@ -66,24 +67,64 @@ def _resolve_turn_total_tokens(turn: Dict[str, Any]) -> Optional[int]:
     return _safe_int(turn.get("actual_token"))
 
 
-def _last_known_token_value(values: List[Optional[int]]) -> Optional[int]:
-    for value in reversed(values):
-        if value is not None:
-            return int(value)
+def _resolve_turn_input_tokens(turn: Dict[str, Any]) -> Optional[int]:
+    value = _safe_int(turn.get("api_input_tokens"))
+    if value is None:
+        value = _safe_int(turn.get("input_tokens"))
+    return value
+
+
+def _resolve_turn_output_tokens(turn: Dict[str, Any]) -> Optional[int]:
+    value = _safe_int(turn.get("api_output_tokens"))
+    if value is None:
+        value = _safe_int(turn.get("output_tokens"))
+    if value is None:
+        value = _safe_int(turn.get("actual_token"))
+    return value
+
+
+def _extract_last_user_message(messages: List[Dict[str, Any]]) -> Optional[str]:
+    for message in reversed(messages):
+        if str(message.get("role", "") or "").strip() == "user":
+            return str(message.get("content", "") or "")
     return None
 
 
-def _compute_token_growths(values: List[Optional[int]]) -> List[int]:
-    growths: List[int] = []
-    last_known_total = 0
-    for value in values:
-        if value is None:
-            growths.append(0)
-            continue
-        current_total = int(value)
-        growths.append(max(0, current_total - last_known_total))
-        last_known_total = current_total
-    return growths
+def _resolve_turn_user_content(turn: Dict[str, Any]) -> str:
+    user_prompt = turn.get("user_prompt")
+    if user_prompt is not None:
+        return str(user_prompt)
+    messages = list(turn.get("messages") or [])
+    extracted = _extract_last_user_message(messages)
+    return "" if extracted is None else extracted
+
+
+def _resolve_turn_assistant_content(turn: Dict[str, Any]) -> str:
+    parsed = str(turn.get("parsed_response") or "").strip()
+    if parsed:
+        return parsed
+    return str(turn.get("raw_response") or "").strip()
+
+
+def _resolve_turn_token_usage_detail(turn: Dict[str, Any]) -> Dict[str, Optional[int]]:
+    input_tokens = _resolve_turn_input_tokens(turn)
+    output_tokens = _resolve_turn_output_tokens(turn)
+    total_tokens = _resolve_turn_total_tokens(turn)
+
+    if total_tokens is not None:
+        if input_tokens is None and output_tokens is not None and int(output_tokens) <= int(total_tokens):
+            input_tokens = int(total_tokens) - int(output_tokens)
+        if output_tokens is None and input_tokens is not None and int(input_tokens) <= int(total_tokens):
+            output_tokens = int(total_tokens) - int(input_tokens)
+
+    if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+        total_tokens = int(input_tokens or 0) + int(output_tokens or 0)
+
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
 
 
 def _normalize_message(message: Dict[str, Any]) -> Dict[str, str]:
@@ -150,65 +191,89 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
     def _flatten_rollouts(self, rollouts: List[Dict[str, Any]]) -> List[TokenEstimationSample]:
         samples: List[TokenEstimationSample] = []
         for rollout_index, rollout in enumerate(rollouts):
-            turns = list(rollout.get("turns") or [])
+            turns = sorted(
+                list(rollout.get("turns") or []),
+                key=lambda turn: int(turn.get("turn_idx", 0) or 0),
+            )
             if not turns:
                 continue
             rollout_success = any(bool(turn.get("success")) for turn in turns)
-            per_turn_actual_tokens = [_resolve_turn_total_tokens(turn) for turn in turns]
-            per_turn_token_growths = _compute_token_growths(per_turn_actual_tokens)
-            final_turn_total_tokens = _last_known_token_value(per_turn_actual_tokens)
+            per_turn_token_usage_details = [
+                _resolve_turn_token_usage_detail(turn) for turn in turns
+            ]
+            per_turn_total_tokens = [
+                detail.get("total_tokens") for detail in per_turn_token_usage_details
+            ]
+            total_rollout_tokens = (
+                None
+                if any(token_value is None for token_value in per_turn_total_tokens)
+                else int(sum(int(token_value) for token_value in per_turn_total_tokens))
+            )
+            first_turn_messages = [
+                _normalize_message(msg) for msg in list(turns[0].get("messages") or [])
+            ]
+            source_system = ""
+            if first_turn_messages and first_turn_messages[0].get("role") == "system":
+                source_system = first_turn_messages[0].get("content", "")
+
+            env_id = _safe_int(rollout.get("env_id"))
+            absolute_env_id = _safe_int(rollout.get("absolute_env_id"))
+
             for turn_offset, turn in enumerate(turns):
-                messages = [_normalize_message(msg) for msg in list(turn.get("messages") or [])]
-                if not messages:
-                    continue
+                completed_turns = turn_offset + 1
+                history_messages: List[Dict[str, str]] = []
+                for prior_turn in turns[:completed_turns]:
+                    history_messages.append(
+                        {
+                            "role": "user",
+                            "content": _resolve_turn_user_content(prior_turn),
+                        }
+                    )
+                    history_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": _resolve_turn_assistant_content(prior_turn),
+                        }
+                    )
 
-                source_system = ""
-                input_messages = messages
-                if messages[0].get("role") == "system":
-                    source_system = messages[0].get("content", "")
-                    input_messages = messages[1:]
-
-                target_output = (
-                    str(turn.get("parsed_response") or "").strip()
-                    or str(turn.get("raw_response") or "").strip()
-                )
+                target_output = _resolve_turn_assistant_content(turn)
                 actual_remaining_turn = _safe_int(turn.get("actual_remaining_turn"))
                 if actual_remaining_turn is None:
-                    actual_remaining_turn = len(turns) - turn_offset
+                    actual_remaining_turn = max(0, len(turns) - completed_turns)
                 completed_turn_token_usage = [
-                    int(token_value)
-                    for token_value in per_turn_token_growths[:turn_offset]
+                    int(detail.get("total_tokens") or 0)
+                    for detail in per_turn_token_usage_details[:completed_turns]
                 ]
-                # Context-window estimation is anchored to the finishing turn's
-                # token footprint, not the cumulative spend across all turns.
+                completed_turn_token_usage_details = [
+                    dict(detail) for detail in per_turn_token_usage_details[:completed_turns]
+                ]
                 actual_tokens_used_so_far = sum(completed_turn_token_usage)
+                remaining_token_values = per_turn_total_tokens[completed_turns:]
                 actual_remaining_total_tokens = (
                     None
-                    if final_turn_total_tokens is None
-                    else max(0, int(final_turn_total_tokens) - int(actual_tokens_used_so_far))
+                    if any(token_value is None for token_value in remaining_token_values)
+                    else int(sum(int(token_value) for token_value in remaining_token_values))
                 )
                 actual_can_finish = (
                     rollout_success
-                    and final_turn_total_tokens is not None
-                    and int(final_turn_total_tokens)
-                    <= int(self.config.max_context_window_tokens)
+                    and total_rollout_tokens is not None
+                    and int(total_rollout_tokens) <= int(self.config.max_context_window_tokens)
                 )
-                env_id = _safe_int(rollout.get("env_id"))
-                absolute_env_id = _safe_int(rollout.get("absolute_env_id"))
 
                 samples.append(
                     TokenEstimationSample(
-                        sample_id=f"rollout-{rollout_index}-turn-{turn_offset + 1}",
+                        sample_id=f"rollout-{rollout_index}-turn-{completed_turns}",
                         rollout_index=rollout_index,
                         env_id=env_id,
                         absolute_env_id=absolute_env_id,
-                        turn_idx=turn_offset + 1,
+                        turn_idx=completed_turns,
                         total_turns=len(turns),
                         source_system=source_system,
-                        input_messages=input_messages,
+                        input_messages=history_messages,
                         target_output=target_output,
-                        completed_turns=turn_offset,
+                        completed_turns=completed_turns,
                         completed_turn_token_usage=completed_turn_token_usage,
+                        completed_turn_token_usage_details=completed_turn_token_usage_details,
                         actual_tokens_used_so_far=actual_tokens_used_so_far,
                         actual_can_finish=actual_can_finish,
                         actual_remaining_turn=actual_remaining_turn,
@@ -230,17 +295,40 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
 
     def build_user_prompt(self, sample: TokenEstimationSample) -> str:
         source_system = sample.source_system if self.config.include_source_system else ""
-        if sample.completed_turn_token_usage:
-            turn_token_usage_text = "\n".join(
-                f"Turn {idx}: {token_usage} tokens"
-                for idx, token_usage in enumerate(sample.completed_turn_token_usage, start=1)
-            )
+        if sample.completed_turn_token_usage_details:
+            turn_token_usage_parts = []
+            for idx, detail in enumerate(sample.completed_turn_token_usage_details, start=1):
+                input_tokens = detail.get("input_tokens")
+                output_tokens = detail.get("output_tokens")
+                total_tokens = detail.get("total_tokens")
+                input_text = (
+                    f"{int(input_tokens)} tokens"
+                    if input_tokens is not None
+                    else "unknown tokens"
+                )
+                output_text = (
+                    f"{int(output_tokens)} tokens"
+                    if output_tokens is not None
+                    else "unknown tokens"
+                )
+                if total_tokens is None:
+                    turn_token_usage_parts.append(
+                        f"Turn {idx}: input {input_text}, output {output_text}"
+                    )
+                else:
+                    turn_token_usage_parts.append(
+                        f"Turn {idx}: input {input_text}, output {output_text}, total {int(total_tokens)} tokens"
+                    )
+            turn_token_usage_text = "; ".join(turn_token_usage_parts)
         else:
             turn_token_usage_text = "None yet."
+        history_json = json.dumps(sample.input_messages, ensure_ascii=False, indent=2)
         return self.config.user_prompt_template.format(
             source_system=source_system,
             input_messages_text=self._format_input_messages(sample.input_messages),
             input_messages_json=json.dumps(sample.input_messages, ensure_ascii=False, indent=2),
+            history_text=self._format_input_messages(sample.input_messages),
+            history_json=history_json,
             turn_idx=int(sample.turn_idx),
             total_turns=int(sample.total_turns),
             completed_turns=int(sample.completed_turns),
@@ -280,6 +368,7 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                     "source_system": sample.source_system,
                     "completed_turns": sample.completed_turns,
                     "completed_turn_token_usage": sample.completed_turn_token_usage,
+                    "completed_turn_token_usage_details": sample.completed_turn_token_usage_details,
                     "actual_tokens_used_so_far": sample.actual_tokens_used_so_far,
                     "actual_can_finish": sample.actual_can_finish,
                     "actual_remaining_total_tokens": sample.actual_remaining_total_tokens,

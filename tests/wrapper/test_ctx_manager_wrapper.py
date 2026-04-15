@@ -1,3 +1,4 @@
+import copy
 import json
 
 from omegaconf import OmegaConf
@@ -452,7 +453,13 @@ def test_output_filename_enables_dialogue_log_for_regular_rollout(tmp_path):
 
     assert len(payload) == 1
     assert payload[0]["mode"] == "dialogue"
+    assert [msg["role"] for msg in payload[0]["turns"][0]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+    ]
     assert payload[0]["turns"][0]["messages"][1]["content"] == "Turn 1 state"
+    assert payload[0]["turns"][0]["messages"][2]["content"] == "<answer>Right</answer>"
     assert payload[0]["turns"][0]["raw_response"] == "<think>plan</think><answer>Right</answer>"
     assert payload[0]["turns"][0]["actions"] == ["Right"]
 
@@ -485,6 +492,79 @@ def test_record_estimation_outputs_keeps_blank_response_for_generation_error(tmp
     assert turn_record["raw_response"] == ""
     assert turn_record["generation_error_code"] == "invalid_prompt"
     assert turn_record["generation_success"] is False
+
+
+def test_finalize_rollout_rewrites_messages_to_completed_pairs(tmp_path):
+    wrapper = make_wrapper(tmp_path, start_group_index=0)
+    env_record = wrapper._ensure_env_record(0, group_id=0, uid=None)
+
+    turn1 = wrapper._ensure_turn_record(env_record, 1)
+    turn1["request_messages"] = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "Turn 1 state"},
+    ]
+    turn1["messages"] = copy.deepcopy(turn1["request_messages"])
+    turn1["user_prompt"] = "Turn 1 state"
+    wrapper._pending_turn_records[(0, 1)] = turn1
+
+    turn2 = wrapper._ensure_turn_record(env_record, 2)
+    turn2["request_messages"] = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "Turn 1 state"},
+        {"role": "assistant", "content": "<answer>Right</answer>"},
+        {"role": "user", "content": "Turn 2 state"},
+    ]
+    turn2["messages"] = copy.deepcopy(turn2["request_messages"])
+    turn2["user_prompt"] = "Turn 2 state"
+    wrapper._pending_turn_records[(0, 2)] = turn2
+
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "CoordSokoban",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<think>r1</think><answer>Right</answer>",
+                        "llm_response": "<answer>Right</answer>",
+                        "actions": ["Right"],
+                        "reward": 0.0,
+                        "token_count": 8,
+                        "info": {"success": False},
+                    },
+                    {
+                        "state": "S2",
+                        "llm_raw_response": "<think>r2</think><answer>Down</answer>",
+                        "llm_response": "<answer>Down</answer>",
+                        "actions": ["Down"],
+                        "reward": 1.0,
+                        "token_count": 9,
+                        "info": {"success": True},
+                    },
+                ],
+            }
+        ]
+    )
+
+    turns = wrapper._estimation_records[0]["turns"]
+    assert [msg["role"] for msg in turns[0]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+    ]
+    assert [msg["role"] for msg in turns[1]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert turns[1]["messages"][1]["content"] == "Turn 1 state"
+    assert turns[1]["messages"][3]["content"] == "Turn 2 state"
+    assert turns[1]["messages"][4]["content"] == "<answer>Down</answer>"
 
 
 def test_single_eval_estimation_records_budget_thinking_before_token_estimation(tmp_path):

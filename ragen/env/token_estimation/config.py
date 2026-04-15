@@ -3,24 +3,29 @@ from typing import Optional
 
 
 DEFAULT_SYSTEM_PROMPT_TEMPLATE = """You are an evaluation agent. Based on the provided rollout context, estimate:
-1. Whether this rollout can still finish successfully while keeping the finishing turn within {max_context_window_tokens} total tokens (input + output).
-2. If yes, by how many total tokens (input + output) the rollout's total-token footprint still needs to grow, relative to the most recently completed turn (or 0 if no turn has been completed yet), in order to reach the finishing turn. This growth includes this turn's output tokens and only the net-new portion of this turn's input tokens relative to the most recently completed turn."""
+1. Whether the rollout can still finish successfully within {max_context_window_tokens} total tokens (input + output).
+2. If yes, how many additional tokens (input + output) are still needed from the next turn onward."""
 
 
 DEFAULT_USER_PROMPT_TEMPLATE = """
 [Original system]
 {source_system}
 
-[Visible history]
-{input_messages_text}
+[Completed history]
+{history_json}
 
-You have completed {completed_turns} turns. Each turn, your token consumption is: 
-{turn_token_usage_text}
+Based on the provided rollout context:
+1. You have completed {completed_turns} turns.
+2. Each completed turn used: {turn_token_usage_text}
+3. You must finish the full interaction within {max_context_window_tokens} total tokens (input + output).
 
-The finishing-turn context-window budget is {max_context_window_tokens} total tokens (input + output). Based on the current state, estimate by how many total tokens (input + output) the rollout's total-token footprint still needs to grow, relative to the most recently completed turn (or 0 if no turn has been completed yet), in order to reach the finishing turn. This growth includes this turn's output tokens and only the net-new portion of this turn's input tokens relative to the most recently completed turn. If the finishing turn would exceed this budget, answer "impossible".
+Estimate:
+1. Whether the rollout can finish successfully within the total token budget.
+2. If yes, how many additional tokens (input + output) are still needed starting from the next turn. Return a tight interval [est_low, est_high].
+3. If no, answer "impossible".
 
 Output exactly one of the following:
-<think>[YOUR THINKING]</think><answer>[Est_low, Est_high]</answer>
+<think>[YOUR THINKING]</think><answer>[est_low, est_high]</answer>
 or
 <think>[YOUR THINKING]</think><answer>impossible</answer>"""
 

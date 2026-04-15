@@ -85,30 +85,41 @@ def test_token_estimation_env_flattens_and_scores(tmp_path):
     second_sample = env.samples[1]
     third_sample = env.samples[2]
     assert first_sample.source_system == "original system prompt"
-    assert first_sample.input_messages == [{"role": "user", "content": "user turn 1"}]
+    assert first_sample.input_messages == [
+        {"role": "user", "content": "user turn 1"},
+        {"role": "assistant", "content": "<think>first</think><answer>search[q]</answer>"},
+    ]
     assert first_sample.actual_can_finish is False
-    assert first_sample.actual_remaining_total_tokens == 140
+    assert first_sample.completed_turns == 1
+    assert first_sample.actual_tokens_used_so_far == 80
+    assert first_sample.actual_remaining_total_tokens == 250
     assert second_sample.actual_can_finish is False
-    assert second_sample.actual_tokens_used_so_far == 80
-    assert second_sample.actual_remaining_total_tokens == 60
-    assert third_sample.completed_turn_token_usage == [80, 30]
-    assert third_sample.actual_tokens_used_so_far == 110
-    assert third_sample.actual_remaining_total_tokens == 30
+    assert second_sample.completed_turns == 2
+    assert second_sample.actual_tokens_used_so_far == 190
+    assert second_sample.actual_remaining_total_tokens == 140
+    assert third_sample.completed_turn_token_usage == [80, 110, 140]
+    assert third_sample.actual_tokens_used_so_far == 330
+    assert third_sample.actual_remaining_total_tokens == 0
 
     env.export_temp_pairs(str(export_path))
     with open(export_path, "r", encoding="utf-8") as handle:
         exported = json.load(handle)
     assert len(exported) == 3
     assert exported[0]["output"] == "<think>first</think><answer>search[q]</answer>"
-    assert exported[0]["actual_tokens_used_so_far"] == 0
-    assert exported[0]["actual_remaining_total_tokens"] == 140
+    assert exported[0]["actual_tokens_used_so_far"] == 80
+    assert exported[0]["actual_remaining_total_tokens"] == 250
+    assert exported[0]["completed_turn_token_usage_details"] == [
+        {"input_tokens": 30, "output_tokens": 50, "total_tokens": 80}
+    ]
 
     prompt = env.reset(index=0)
     assert "user turn 1" in prompt
-    assert "You have completed 0 turns." in prompt
+    assert "search[q]" in prompt
+    assert "You have completed 1 turns." in prompt
+    assert "Turn 1: input 30 tokens, output 50 tokens, total 80 tokens" in prompt
     system_message, user_message = env.build_api_messages()
     assert system_message["role"] == "system"
-    assert "keeping the finishing turn within 120 total tokens (input + output)" in system_message["content"]
+    assert "finish successfully within 120 total tokens (input + output)" in system_message["content"]
     assert user_message["role"] == "user"
 
     _, reward, done, info = env.step(
@@ -122,5 +133,6 @@ def test_token_estimation_env_flattens_and_scores(tmp_path):
     assert info["metrics"]["remaining_token_interval_contains_actual"] is None
 
     prompt_third = env.reset(index=2)
-    assert "Turn 1: 80 tokens" in prompt_third
-    assert "Turn 2: 30 tokens" in prompt_third
+    assert "Turn 1: input 30 tokens, output 50 tokens, total 80 tokens" in prompt_third
+    assert "Turn 2: input 40 tokens, output 70 tokens, total 110 tokens" in prompt_third
+    assert "Turn 3: input 55 tokens, output 85 tokens, total 140 tokens" in prompt_third
