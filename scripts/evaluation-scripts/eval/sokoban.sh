@@ -45,10 +45,10 @@ case "$PROVIDER" in
     ;;
 esac
 
-RUN_NAME=${RUN_NAME:-sokoban-origin-gpt5.2-instant-238-main-new_gpt5.2-instant-token-estimation-test}
+RUN_NAME=${RUN_NAME:-sokoban-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-20-test}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/${RUN_NAME}"}
-INPUT_JSON=${INPUT_JSON:-}
+INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"}
 OUTPUT_JSON=${OUTPUT_JSON:-"$OUTPUT_DIR/${RUN_NAME}.json"}
 TEMP_JSON=${TEMP_JSON:-"$OUTPUT_DIR/${RUN_NAME}_pairs.json"}
 SYSTEM_PROMPT_FILE=${SYSTEM_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_system.txt"}
@@ -56,16 +56,16 @@ USER_PROMPT_FILE=${USER_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_use
 
 MAX_TURN=${MAX_TURN:-1}
 MAX_CONTEXT_WINDOW_TOKENS=${MAX_CONTEXT_WINDOW_TOKENS:-2500}
-MAX_SAMPLES=${MAX_SAMPLES:-}
+MAX_SAMPLES=${MAX_SAMPLES:-20}
 MAX_CONCURRENCY=${MAX_CONCURRENCY:-8}
 REQUEST_BATCH_SIZE=${REQUEST_BATCH_SIZE:-32}
 MAX_TOKENS=${MAX_TOKENS:-512}
 TEMPERATURE=${TEMPERATURE:-0.0}
 DRY_RUN=${DRY_RUN:-0}
 
-DEFAULT_RESULT_INPUT_JSON="$PROJECT_ROOT/results/estimation/sokoban-origin-gpt5.2-instant-128-main-new/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
+DEFAULT_RESULT_INPUT_JSON="$PROJECT_ROOT/results/estimation/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
 DEFAULT_BENCHMARK_INPUT_JSON="$PROJECT_ROOT/results/budget-estimation-benchmark/sokoban-origin-gpt5.2-instant-128-window=1-max-turn=6/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
-DEFAULT_DATABASE_INPUT_JSON="/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main-new/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
+DEFAULT_DATABASE_INPUT_JSON="/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
 if [[ -z "${INPUT_JSON:-}" ]]; then
   if [[ -f "$DEFAULT_RESULT_INPUT_JSON" ]]; then
     INPUT_JSON="$DEFAULT_RESULT_INPUT_JSON"

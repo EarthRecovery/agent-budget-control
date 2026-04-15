@@ -74,8 +74,11 @@ MAX_TOKENS=${MAX_TOKENS:-2048}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-50000}
 MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-50000}
 PROMPT_TOKEN_MARGIN=${PROMPT_TOKEN_MARGIN:-1024}
+TRUNCATION_MODE=${TRUNCATION_MODE:-token}
+NO_BUDGET_PROMPT=${NO_BUDGET_PROMPT:-True}
+MAX_CONTEXT_TOKEN=${MAX_CONTEXT_TOKEN:-2500}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/estimation"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/searchr1-origin-gpt5.2-instant-4-test3"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/searchr1-origin-gpt5.2-instant-4-test4"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 
 DEFAULT_SEARCH_DATA_PATH=$(resolve_path "${SEARCH_DATA_DIR}/train.parquet")
@@ -111,8 +114,11 @@ mkdir -p "$OUTPUT_DIR" "$HYDRA_DIR"
 python -m ragen.eval_api --config-name evaluate_api_llm \
   model_config.model_name="${MODEL_NAME}" \
   agent_proxy.enable_think=True \
+  ++agent_proxy.truncation_mode="${TRUNCATION_MODE}" \
+  ++agent_proxy.max_context_token=${MAX_CONTEXT_TOKEN} \
   agent_proxy.max_turn=${MAX_TURN} \
   agent_proxy.max_actions_per_turn=${MAX_ACTIONS_PER_TURN} \
+  agent_proxy.no_budget_prompt=${NO_BUDGET_PROMPT} \
   es_manager.val.env_groups=${VAL_GROUPS} \
   es_manager.val.group_size=1 \
   es_manager.val.start_group_index=${VAL_START_GROUP_INDEX} \

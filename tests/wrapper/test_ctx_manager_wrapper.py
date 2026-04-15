@@ -453,13 +453,7 @@ def test_output_filename_enables_dialogue_log_for_regular_rollout(tmp_path):
 
     assert len(payload) == 1
     assert payload[0]["mode"] == "dialogue"
-    assert [msg["role"] for msg in payload[0]["turns"][0]["messages"]] == [
-        "system",
-        "user",
-        "assistant",
-    ]
     assert payload[0]["turns"][0]["messages"][1]["content"] == "Turn 1 state"
-    assert payload[0]["turns"][0]["messages"][2]["content"] == "<answer>Right</answer>"
     assert payload[0]["turns"][0]["raw_response"] == "<think>plan</think><answer>Right</answer>"
     assert payload[0]["turns"][0]["actions"] == ["Right"]
 
@@ -565,6 +559,137 @@ def test_finalize_rollout_rewrites_messages_to_completed_pairs(tmp_path):
     assert turns[1]["messages"][1]["content"] == "Turn 1 state"
     assert turns[1]["messages"][3]["content"] == "Turn 2 state"
     assert turns[1]["messages"][4]["content"] == "<answer>Down</answer>"
+
+
+def test_finalize_rollout_skips_blank_assistant_turns_in_completed_pairs(tmp_path):
+    wrapper = make_wrapper(tmp_path, start_group_index=0)
+    env_record = wrapper._ensure_env_record(0, group_id=0, uid=None)
+
+    turn1 = wrapper._ensure_turn_record(env_record, 1)
+    turn1["request_messages"] = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "Turn 1 state"},
+    ]
+    turn1["messages"] = copy.deepcopy(turn1["request_messages"])
+    turn1["user_prompt"] = "Turn 1 state"
+    turn1["generation_suffix"] = "<think>"
+    turn1["prompt_text"] = wrapper._build_prompt_text_for_messages(
+        turn1["request_messages"],
+        turn1["generation_suffix"],
+    )
+    turn1["api_input_tokens"] = wrapper._count_tokens(turn1["prompt_text"])
+    turn1["api_output_tokens"] = 8
+    turn1["api_total_tokens"] = turn1["api_input_tokens"] + turn1["api_output_tokens"]
+    wrapper._pending_turn_records[(0, 1)] = turn1
+
+    turn2 = wrapper._ensure_turn_record(env_record, 2)
+    turn2["request_messages"] = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "Turn 1 state"},
+        {"role": "assistant", "content": "<answer>Right</answer>"},
+        {"role": "user", "content": "Turn 2 state"},
+    ]
+    turn2["messages"] = copy.deepcopy(turn2["request_messages"])
+    turn2["user_prompt"] = "Turn 2 state"
+    turn2["generation_suffix"] = "<think>"
+    turn2["prompt_text"] = wrapper._build_prompt_text_for_messages(
+        turn2["request_messages"],
+        turn2["generation_suffix"],
+    )
+    turn2["api_input_tokens"] = wrapper._count_tokens(turn2["prompt_text"])
+    turn2["api_output_tokens"] = 0
+    turn2["api_total_tokens"] = turn2["api_input_tokens"] + turn2["api_output_tokens"]
+    wrapper._pending_turn_records[(0, 2)] = turn2
+
+    turn3 = wrapper._ensure_turn_record(env_record, 3)
+    turn3["request_messages"] = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "Turn 1 state"},
+        {"role": "assistant", "content": "<answer>Right</answer>"},
+        {"role": "user", "content": "Turn 2 state"},
+        {"role": "assistant", "content": ""},
+        {"role": "user", "content": "Turn 3 state"},
+    ]
+    turn3["messages"] = copy.deepcopy(turn3["request_messages"])
+    turn3["user_prompt"] = "Turn 3 state"
+    turn3["generation_suffix"] = "<think>"
+    turn3["prompt_text"] = wrapper._build_prompt_text_for_messages(
+        turn3["request_messages"],
+        turn3["generation_suffix"],
+    )
+    turn3["api_input_tokens"] = wrapper._count_tokens(turn3["prompt_text"])
+    turn3["api_output_tokens"] = 9
+    turn3["api_total_tokens"] = turn3["api_input_tokens"] + turn3["api_output_tokens"]
+    wrapper._pending_turn_records[(0, 3)] = turn3
+
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "CoordSokoban",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<think>r1</think><answer>Right</answer>",
+                        "llm_response": "<answer>Right</answer>",
+                        "actions": ["Right"],
+                        "reward": 0.0,
+                        "token_count": 8,
+                        "info": {"success": False},
+                    },
+                    {
+                        "state": "S2",
+                        "llm_raw_response": "",
+                        "llm_response": "",
+                        "actions": [],
+                        "reward": 0.0,
+                        "token_count": 0,
+                        "info": {"success": False},
+                    },
+                    {
+                        "state": "S3",
+                        "llm_raw_response": "<think>r3</think><answer>Down</answer>",
+                        "llm_response": "<answer>Down</answer>",
+                        "actions": ["Down"],
+                        "reward": 1.0,
+                        "token_count": 9,
+                        "info": {"success": True},
+                    },
+                ],
+            }
+        ]
+    )
+
+    turns = wrapper._estimation_records[0]["turns"]
+    assert [msg["role"] for msg in turns[0]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+    ]
+    assert [msg["role"] for msg in turns[1]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+    ]
+    assert [msg["role"] for msg in turns[2]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert turns[1]["messages"][1]["content"] == "Turn 1 state"
+    assert turns[2]["messages"][1]["content"] == "Turn 1 state"
+    assert turns[2]["messages"][3]["content"] == "Turn 3 state"
+    assert turns[2]["messages"][4]["content"] == "<answer>Down</answer>"
+    assert turns[1]["sliced_out_of_history"] is True
+    assert turns[2]["api_input_tokens"] == 13
+    assert turns[2]["api_total_tokens"] == 22
+    payload = wrapper._build_estimation_payload()[0]
+    assert payload["api_input_tokens"] == turns[0]["api_input_tokens"] + turns[2]["api_input_tokens"]
+    assert payload["api_total_tokens"] == turns[0]["api_total_tokens"] + turns[2]["api_total_tokens"]
 
 
 def test_single_eval_estimation_records_budget_thinking_before_token_estimation(tmp_path):

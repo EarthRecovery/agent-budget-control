@@ -24,6 +24,17 @@ Estimate:
 2. If yes, how many additional tokens (input + output) are still needed starting from the next turn. Return a tight interval [est_low, est_high].
 3. If no, answer "impossible".
 
+Example:
+For a three-turn interaction, suppose only Turn 1 has been completed.
+The full interaction is:
+Turn 1: input X1 tokens, output Y1 tokens;
+Turn 2: input X2 tokens, output Y2 tokens;
+Turn 3: input X3 tokens, output Y3 tokens.
+You will receive:
+turn_token_usage_text: Turn 1: input X1 tokens, output Y1 tokens
+You should estimate:
+X2 + Y2 + X3 + Y3
+
 Output exactly one of the following:
 <think>[YOUR THINKING]</think><answer>[est_low, est_high]</answer>
 or

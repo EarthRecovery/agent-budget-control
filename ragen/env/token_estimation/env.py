@@ -27,6 +27,7 @@ class TokenEstimationSample:
     input_messages: List[Dict[str, str]]
     target_output: str
     completed_turns: int
+    relative_progress: float
     completed_turn_token_usage: List[int]
     completed_turn_token_usage_details: List[Dict[str, Optional[int]]]
     actual_tokens_used_so_far: int
@@ -106,6 +107,10 @@ def _resolve_turn_assistant_content(turn: Dict[str, Any]) -> str:
     return str(turn.get("raw_response") or "").strip()
 
 
+def _has_turn_assistant_content(turn: Dict[str, Any]) -> bool:
+    return bool(_resolve_turn_assistant_content(turn))
+
+
 def _resolve_turn_token_usage_detail(turn: Dict[str, Any]) -> Dict[str, Optional[int]]:
     input_tokens = _resolve_turn_input_tokens(turn)
     output_tokens = _resolve_turn_output_tokens(turn)
@@ -125,6 +130,109 @@ def _resolve_turn_token_usage_detail(turn: Dict[str, Any]) -> Dict[str, Optional
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
     }
+
+
+def _usage_details_look_cumulative(
+    details: List[Dict[str, Optional[int]]],
+) -> bool:
+    comparable = 0
+    cumulative_votes = 0
+    prev_total: Optional[int] = None
+    for detail in details:
+        current_total = detail.get("total_tokens")
+        current_input = detail.get("input_tokens")
+        if prev_total is not None and current_input is not None:
+            comparable += 1
+            if int(current_input) >= int(prev_total):
+                cumulative_votes += 1
+        if current_total is not None:
+            prev_total = int(current_total)
+    if comparable == 0:
+        return False
+    return cumulative_votes * 2 >= comparable
+
+
+def _normalize_turn_usage_details(
+    raw_details: List[Dict[str, Optional[int]]],
+) -> Tuple[List[Dict[str, Optional[int]]], List[Optional[int]], str]:
+    if not raw_details:
+        return [], [], "delta"
+
+    if not _usage_details_look_cumulative(raw_details):
+        cumulative_totals: List[Optional[int]] = []
+        running_total = 0
+        for detail in raw_details:
+            total_tokens = detail.get("total_tokens")
+            if total_tokens is None and (
+                detail.get("input_tokens") is not None or detail.get("output_tokens") is not None
+            ):
+                total_tokens = int(detail.get("input_tokens") or 0) + int(detail.get("output_tokens") or 0)
+            if total_tokens is None:
+                cumulative_totals.append(None)
+                continue
+            running_total += int(total_tokens)
+            cumulative_totals.append(running_total)
+        return [dict(detail) for detail in raw_details], cumulative_totals, "delta"
+
+    normalized_details: List[Dict[str, Optional[int]]] = []
+    cumulative_totals: List[Optional[int]] = []
+    prev_total = 0
+    prev_total_known = True
+    for detail in raw_details:
+        current_input = detail.get("input_tokens")
+        current_output = detail.get("output_tokens")
+        current_total = detail.get("total_tokens")
+
+        if current_total is None and (
+            current_input is not None or current_output is not None
+        ):
+            current_total = int(current_input or 0) + int(current_output or 0)
+
+        if current_total is None:
+            cumulative_totals.append(None)
+            normalized_details.append(
+                {
+                    "input_tokens": current_input,
+                    "output_tokens": current_output,
+                    "total_tokens": current_total,
+                }
+            )
+            prev_total_known = False
+            continue
+
+        current_total_int = int(current_total)
+        cumulative_totals.append(current_total_int)
+
+        input_delta: Optional[int]
+        if current_input is None:
+            input_delta = None
+        elif prev_total_known:
+            input_delta = max(0, int(current_input) - int(prev_total))
+        else:
+            input_delta = int(current_input)
+
+        output_delta = None if current_output is None else int(current_output)
+
+        if prev_total_known:
+            total_delta = max(0, current_total_int - int(prev_total))
+        else:
+            total_delta = current_total_int
+
+        normalized_total = total_delta
+        if input_delta is None and output_delta is not None:
+            input_delta = max(0, total_delta - int(output_delta))
+
+        normalized_details.append(
+            {
+                "input_tokens": input_delta,
+                "output_tokens": output_delta,
+                "total_tokens": normalized_total,
+            }
+        )
+        prev_total = current_total_int
+        prev_total_known = True
+
+    return normalized_details, cumulative_totals, "cumulative"
 
 
 def _normalize_message(message: Dict[str, Any]) -> Dict[str, str]:
@@ -191,23 +299,28 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
     def _flatten_rollouts(self, rollouts: List[Dict[str, Any]]) -> List[TokenEstimationSample]:
         samples: List[TokenEstimationSample] = []
         for rollout_index, rollout in enumerate(rollouts):
-            turns = sorted(
+            raw_turns = sorted(
                 list(rollout.get("turns") or []),
                 key=lambda turn: int(turn.get("turn_idx", 0) or 0),
             )
+            if not raw_turns:
+                continue
+            turns = [turn for turn in raw_turns if _has_turn_assistant_content(turn)]
             if not turns:
                 continue
+
             rollout_success = any(bool(turn.get("success")) for turn in turns)
-            per_turn_token_usage_details = [
+            raw_per_turn_token_usage_details = [
                 _resolve_turn_token_usage_detail(turn) for turn in turns
             ]
-            per_turn_total_tokens = [
-                detail.get("total_tokens") for detail in per_turn_token_usage_details
-            ]
+            per_turn_token_usage_details, cumulative_turn_totals, _ = (
+                _normalize_turn_usage_details(raw_per_turn_token_usage_details)
+            )
+            per_turn_total_tokens = list(cumulative_turn_totals)
             total_rollout_tokens = (
                 None
                 if any(token_value is None for token_value in per_turn_total_tokens)
-                else int(sum(int(token_value) for token_value in per_turn_total_tokens))
+                else int(per_turn_total_tokens[-1])
             )
             first_turn_messages = [
                 _normalize_message(msg) for msg in list(turns[0].get("messages") or [])
@@ -219,8 +332,8 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
             env_id = _safe_int(rollout.get("env_id"))
             absolute_env_id = _safe_int(rollout.get("absolute_env_id"))
 
-            for turn_offset, turn in enumerate(turns):
-                completed_turns = turn_offset + 1
+            for completed_turns in range(1, len(turns)):
+                next_turn = turns[completed_turns]
                 history_messages: List[Dict[str, str]] = []
                 for prior_turn in turns[:completed_turns]:
                     history_messages.append(
@@ -236,10 +349,13 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                         }
                     )
 
-                target_output = _resolve_turn_assistant_content(turn)
-                actual_remaining_turn = _safe_int(turn.get("actual_remaining_turn"))
-                if actual_remaining_turn is None:
-                    actual_remaining_turn = max(0, len(turns) - completed_turns)
+                target_output = _resolve_turn_assistant_content(next_turn)
+                actual_remaining_turn = max(0, len(turns) - completed_turns)
+                relative_progress = (
+                    float(completed_turns) / float(len(turns))
+                    if turns
+                    else 0.0
+                )
                 completed_turn_token_usage = [
                     int(detail.get("total_tokens") or 0)
                     for detail in per_turn_token_usage_details[:completed_turns]
@@ -247,12 +363,16 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                 completed_turn_token_usage_details = [
                     dict(detail) for detail in per_turn_token_usage_details[:completed_turns]
                 ]
-                actual_tokens_used_so_far = sum(completed_turn_token_usage)
-                remaining_token_values = per_turn_total_tokens[completed_turns:]
+                current_total_tokens = per_turn_total_tokens[completed_turns - 1]
+                actual_tokens_used_so_far = (
+                    sum(completed_turn_token_usage)
+                    if current_total_tokens is None
+                    else int(current_total_tokens)
+                )
                 actual_remaining_total_tokens = (
                     None
-                    if any(token_value is None for token_value in remaining_token_values)
-                    else int(sum(int(token_value) for token_value in remaining_token_values))
+                    if total_rollout_tokens is None or current_total_tokens is None
+                    else max(0, int(total_rollout_tokens) - int(current_total_tokens))
                 )
                 actual_can_finish = (
                     rollout_success
@@ -272,6 +392,7 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                         input_messages=history_messages,
                         target_output=target_output,
                         completed_turns=completed_turns,
+                        relative_progress=relative_progress,
                         completed_turn_token_usage=completed_turn_token_usage,
                         completed_turn_token_usage_details=completed_turn_token_usage_details,
                         actual_tokens_used_so_far=actual_tokens_used_so_far,
@@ -332,6 +453,8 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
             turn_idx=int(sample.turn_idx),
             total_turns=int(sample.total_turns),
             completed_turns=int(sample.completed_turns),
+            relative_progress=float(sample.relative_progress),
+            relative_progress_text=f"{float(sample.relative_progress):.2f}",
             turn_token_usage_text=turn_token_usage_text,
             max_context_window_tokens=int(self.config.max_context_window_tokens),
         ).strip()
@@ -367,6 +490,8 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                     "output": sample.target_output,
                     "source_system": sample.source_system,
                     "completed_turns": sample.completed_turns,
+                    "total_turns": sample.total_turns,
+                    "relative_progress": sample.relative_progress,
                     "completed_turn_token_usage": sample.completed_turn_token_usage,
                     "completed_turn_token_usage_details": sample.completed_turn_token_usage_details,
                     "actual_tokens_used_so_far": sample.actual_tokens_used_so_far,

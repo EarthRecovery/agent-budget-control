@@ -311,17 +311,19 @@ class CtxManagerWrapper:
         for env_id in sorted(self._estimation_records):
             record = self._estimation_records[env_id]
             turns = sorted(record.get("turns", []), key=lambda item: item.get("turn_idx", 0))
+            effective_turns = [turn for turn in turns if self._turn_in_estimation_slice(turn)]
+            summary_turns = effective_turns if effective_turns else turns
             api_interaction_count = self._sum_optional_ints(
-                [turn.get("api_interaction_count") for turn in turns]
+                [turn.get("api_interaction_count") for turn in summary_turns]
             )
             api_input_tokens = self._sum_optional_ints(
-                [turn.get("api_input_tokens") for turn in turns]
+                [turn.get("api_input_tokens") for turn in summary_turns]
             )
             api_output_tokens = self._sum_optional_ints(
-                [turn.get("api_output_tokens") for turn in turns]
+                [turn.get("api_output_tokens") for turn in summary_turns]
             )
             api_total_tokens = self._sum_optional_ints(
-                [turn.get("api_total_tokens") for turn in turns]
+                [turn.get("api_total_tokens") for turn in summary_turns]
             )
             group_id = record.get("group_id")
             absolute_group_id = (
@@ -884,12 +886,12 @@ class CtxManagerWrapper:
                 )
 
             if self._eval_estimation_enabled():
-                self._rewrite_completed_history_messages(
-                    sorted(
-                        env_record.get("turns", []),
-                        key=lambda item: int(item.get("turn_idx", 0) or 0),
-                    )
+                sorted_turns = sorted(
+                    env_record.get("turns", []),
+                    key=lambda item: int(item.get("turn_idx", 0) or 0),
                 )
+                self._rewrite_completed_history_messages(sorted_turns)
+                self._adjust_sliced_turn_token_usage(sorted_turns)
 
         self._pending_turn_records = {}
         self._write_estimation_log()
@@ -979,6 +981,9 @@ class CtxManagerWrapper:
             ),
         }
 
+    def _turn_in_estimation_slice(self, turn_record: Dict[str, Any]) -> bool:
+        return not bool(turn_record.get("sliced_out_of_history", False))
+
     def _ensure_env_record(
         self,
         env_id: int,
@@ -1013,6 +1018,7 @@ class CtxManagerWrapper:
             "turn_idx": int(turn_idx),
             "mode": self.mode,
             "questions": self._build_eval_estimation_questions(),
+            "sliced_out_of_history": False,
         }
         env_record["turns"].append(turn_record)
         return turn_record
@@ -1061,6 +1067,62 @@ class CtxManagerWrapper:
             return parsed_response
         return str(turn_record.get("raw_response") or "").strip()
 
+    def _turn_record_has_assistant_reply(self, turn_record: Dict[str, Any]) -> bool:
+        return bool(self._resolve_turn_assistant_message(turn_record))
+
+    def _build_prompt_text_for_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        generation_suffix: str,
+    ) -> str:
+        if hasattr(self.tokenizer, "apply_chat_template"):
+            text = self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=False,
+                **self._get_chat_template_kwargs(),
+            )
+        else:
+            blocks = []
+            for message in messages:
+                role = str(message.get("role", "") or "")
+                content = str(message.get("content", "") or "")
+                blocks.append(f"{role}: {content}")
+            text = "\n".join(blocks)
+        if generation_suffix:
+            text += generation_suffix
+        return text
+
+    def _build_sliced_request_messages(
+        self,
+        valid_turns: List[Dict[str, Any]],
+        current_turn: Dict[str, Any],
+        system_content: str,
+    ) -> List[Dict[str, str]]:
+        request_messages: List[Dict[str, str]] = []
+        if system_content:
+            request_messages.append({"role": "system", "content": system_content})
+        for prior_turn in valid_turns:
+            request_messages.append(
+                {
+                    "role": "user",
+                    "content": self._resolve_turn_user_prompt(prior_turn),
+                }
+            )
+            request_messages.append(
+                {
+                    "role": "assistant",
+                    "content": self._resolve_turn_assistant_message(prior_turn),
+                }
+            )
+        request_messages.append(
+            {
+                "role": "user",
+                "content": self._resolve_turn_user_prompt(current_turn),
+            }
+        )
+        return request_messages
+
     def _extract_history_system_message(self, turns: List[Dict[str, Any]]) -> str:
         for turn_record in turns:
             messages = turn_record.get("request_messages") or turn_record.get("messages") or []
@@ -1078,6 +1140,10 @@ class CtxManagerWrapper:
             if system_content:
                 history_messages.append({"role": "system", "content": system_content})
             for completed_turn in turns[:upto_idx]:
+                has_reply = self._turn_record_has_assistant_reply(completed_turn)
+                completed_turn["sliced_out_of_history"] = not has_reply
+                if not has_reply:
+                    continue
                 history_messages.append(
                     {
                         "role": "user",
@@ -1091,6 +1157,64 @@ class CtxManagerWrapper:
                     }
                 )
             turn_record["messages"] = history_messages
+
+    def _adjust_sliced_turn_token_usage(self, turns: List[Dict[str, Any]]) -> None:
+        system_content = self._extract_history_system_message(turns)
+        valid_turns: List[Dict[str, Any]] = []
+        for turn_record in turns:
+            if not self._turn_record_has_assistant_reply(turn_record):
+                turn_record["sliced_out_of_history"] = True
+                continue
+
+            sliced_request_messages = self._build_sliced_request_messages(
+                valid_turns=valid_turns,
+                current_turn=turn_record,
+                system_content=system_content,
+            )
+            generation_suffix = str(turn_record.get("generation_suffix", "") or "")
+            sliced_prompt_text = self._build_prompt_text_for_messages(
+                sliced_request_messages,
+                generation_suffix=generation_suffix,
+            )
+            turn_record["sliced_request_messages"] = sliced_request_messages
+            turn_record["sliced_prompt_text"] = sliced_prompt_text
+
+            original_prompt_text = str(turn_record.get("prompt_text", "") or "")
+            original_local_prompt_tokens = (
+                self._count_tokens(original_prompt_text) if original_prompt_text else None
+            )
+            sliced_local_prompt_tokens = self._count_tokens(sliced_prompt_text)
+            turn_record["sliced_prompt_token_estimate"] = sliced_local_prompt_tokens
+
+            prompt_token_delta = None
+            if original_local_prompt_tokens is not None:
+                prompt_token_delta = max(
+                    0,
+                    int(original_local_prompt_tokens) - int(sliced_local_prompt_tokens),
+                )
+            turn_record["prompt_token_delta_due_to_skipped_turns"] = prompt_token_delta
+
+            api_input_tokens = turn_record.get("api_input_tokens")
+            api_output_tokens = turn_record.get("api_output_tokens")
+            api_total_tokens = turn_record.get("api_total_tokens")
+
+            if api_input_tokens is not None and prompt_token_delta is not None:
+                adjusted_input_tokens = max(0, int(api_input_tokens) - int(prompt_token_delta))
+                turn_record["api_input_tokens"] = adjusted_input_tokens
+                if api_total_tokens is not None:
+                    turn_record["api_total_tokens"] = max(
+                        0,
+                        int(api_total_tokens) - int(prompt_token_delta),
+                    )
+                elif api_output_tokens is not None:
+                    turn_record["api_total_tokens"] = adjusted_input_tokens + int(api_output_tokens)
+            elif api_input_tokens is None:
+                turn_record["api_input_tokens"] = int(sliced_local_prompt_tokens)
+                if api_output_tokens is not None and api_total_tokens is None:
+                    turn_record["api_total_tokens"] = int(sliced_local_prompt_tokens) + int(api_output_tokens)
+
+            turn_record["sliced_out_of_history"] = False
+            valid_turns.append(turn_record)
 
     def _get_eval_compliance_limit_for_env(
         self,
