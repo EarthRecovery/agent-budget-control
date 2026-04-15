@@ -266,6 +266,7 @@ def make_turn_compliance_wrapper(
     base_group_size=1,
     mutation_turn=None,
     budget_change=None,
+    no_budget_prompt=False,
 ):
     if turn_scope is None:
         turn_scope = [1, 2, 3, 4, 5]
@@ -284,6 +285,7 @@ def make_turn_compliance_wrapper(
                 "eval_compliance_turn_scope": turn_scope,
                 "eval_compliance_turn_mutation_turn": mutation_turn,
                 "eval_compliance_turn_budget_change": budget_change or [],
+                "no_budget_prompt": no_budget_prompt,
             },
             "output": {
                 "dir": str(tmp_path),
@@ -1099,6 +1101,84 @@ def test_eval_turn_compliance_prompt_uses_env_specific_turn_limit(tmp_path):
     assert "Budget turn: 1." in prompt
     assert "Current turn: 3." in prompt
     assert "You have already exceeded this budget by 2 turn(s)." in prompt
+
+
+def test_no_budget_prompt_skips_turn_budget_prompt(tmp_path):
+    config = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "enable_ctx_wrapper": True,
+                "no_budget_prompt": True,
+            },
+            "output": {
+                "dir": str(tmp_path),
+                "filename": "sokoban_origin.pkl",
+            },
+            "es_manager": {
+                "val": {
+                    "start_group_index": 0,
+                    "group_size": 1,
+                }
+            },
+        }
+    )
+    wrapper = CtxManagerWrapper(config, DummyTokenizer())
+    wrapper.turn_idx = 2
+    messages_list = [[{"role": "user", "content": "Question"}]]
+
+    wrapper._inject_budget_prompt(messages_list, budget_turns=[5])
+
+    assert messages_list[0][0]["content"] == "Question"
+
+
+def test_no_budget_prompt_skips_turn_compliance_prompt(tmp_path):
+    wrapper = make_turn_compliance_wrapper(
+        tmp_path,
+        start_group_index=0,
+        no_budget_prompt=True,
+    )
+    wrapper.turn_idx = 2
+    messages_list = [[{"role": "user", "content": "Question"}]]
+
+    wrapper._inject_eval_compliance_turn_prompt(messages_list, env_ids=[0], group_ids=[0])
+
+    assert messages_list[0][0]["content"] == "Question"
+
+
+def test_no_budget_prompt_skips_turn_benchmark_guidance(tmp_path):
+    config = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "enable_ctx_wrapper": True,
+                "no_budget_prompt": True,
+                "benchmark_factors": {
+                    "enabled": True,
+                    "mode": "turn",
+                    "low_bound": 2,
+                    "high_bound": 5,
+                },
+                "max_turn": 10,
+            },
+            "output": {
+                "dir": str(tmp_path),
+                "filename": "benchmark_eval.pkl",
+            },
+            "es_manager": {
+                "val": {
+                    "start_group_index": 0,
+                    "group_size": 1,
+                }
+            },
+        }
+    )
+    wrapper = CtxManagerWrapper(config, DummyTokenizer())
+    wrapper.turn_idx = 2
+    wrapper.state = {"max_turn": 10}
+    messages_list = [[{"role": "user", "content": "Question"}]]
+
+    wrapper._inject_benchmark_turn_prompt(messages_list)
+
+    assert messages_list[0][0]["content"] == "Question"
 
 
 def test_eval_turn_compliance_limit_repeats_for_original_group_copies(tmp_path):

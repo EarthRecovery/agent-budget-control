@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 from ragen.llm_agent.ctx_manager import ContextManager
 from omegaconf import OmegaConf
 from verl.protocol import DataProto
@@ -17,7 +18,10 @@ class DummyTokenizer:
             attention_mask = torch.tensor([[1, 1, 1]] * batch_size)
         return DummyOutput()
 
-    def encode(self, text):
+    def batch_decode(self, responses, skip_special_tokens=True):
+        return list(responses)
+
+    def encode(self, text, add_special_tokens=False):
         # Return a dummy list of token ids; must be at least length 1 for [0] indexing
         return [42, 43]
 
@@ -85,6 +89,30 @@ def test_context_window_truncation(dummy_config):
     assert "S1" not in str(messages)
     assert "S2" in str(messages)
     assert "S3" in str(messages)
+
+
+def test_get_env_inputs_prefers_api_usage_totals(dummy_config):
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=dummy_config, tokenizer=tokenizer, mode="train")
+
+    lm_outputs = DataProto()
+    lm_outputs.non_tensor_batch = {
+        "response_texts": np.array(["<answer>up</answer>"], dtype=object),
+        "env_ids": np.array([0], dtype=int),
+        "response_errors": np.array([None], dtype=object),
+        "api_usages": np.array(
+            [{"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}],
+            dtype=object,
+        ),
+        "prompt_token_counts": np.array([9], dtype=object),
+    }
+
+    env_inputs = ctx.get_env_inputs(lm_outputs)
+
+    assert env_inputs[0]["input_tokens"] == 11
+    assert env_inputs[0]["output_tokens"] == 7
+    assert env_inputs[0]["total_tokens"] == 18
+    assert env_inputs[0]["response_tokens"] == 2
 
 
 def test_multi_eval_estimation_generation_prefix_uses_budget_thinking(dummy_config):
@@ -216,6 +244,18 @@ def test_robotouille_omits_placeholder_action_lookup_from_prefix():
 
     assert "Your available actions are:" not in ctx.prefix_lookup[0]
     assert "Action[0]" not in ctx.prefix_lookup[0]
+
+
+def test_no_budget_prompt_omits_full_trajectory_action_budget_from_system_prompt(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["no_budget_prompt"] = True
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+
+    assert "Your available actions are:" in ctx.prefix_lookup[0]
+    assert "You may output at most 2 action(s) in a single turn" in ctx.prefix_lookup[0]
+    assert "You can make up to 10 actions total across the full trajectory." not in ctx.prefix_lookup[0]
 
 
 def test_robotouille_flattens_nested_env_config_for_prompt_metadata():
@@ -448,6 +488,56 @@ def test_eval_turn_compliance_omits_length_prompt_from_context(dummy_config):
     assert "Max response length:" not in turn_content
     assert "<budget-thinking>" not in turn_content
     assert ctx._get_generation_prefix() == "<think>"
+
+
+def test_no_budget_prompt_omits_turn_label_from_context(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["no_budget_prompt"] = True
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+    ctx.env_config_lookup = {0: {"max_tokens": 128, "env_tag": "CoordSokoban", "env_type": "sokoban"}}
+
+    turn_content = ctx._build_turn_state_content(
+        {"state": "S1", "actions_left": 3},
+        turn_number=1,
+        env_id=0,
+    )
+
+    assert "Turn 1:" not in turn_content
+    assert "actions left" not in turn_content
+    assert "\nState:\nS1\n" in turn_content
+
+
+def test_no_budget_prompt_omits_turn_and_action_budget_in_single_turn_memory(dummy_config):
+    cfg = OmegaConf.create(OmegaConf.to_container(dummy_config, resolve=True))
+    cfg.agent_proxy["no_budget_prompt"] = True
+
+    tokenizer = DummyTokenizer()
+    ctx = ContextManager(config=cfg, tokenizer=tokenizer, mode="train")
+    ctx.prefix_lookup = {0: "Initial prompt"}
+    ctx.env_config_lookup = {0: {"max_tokens": 128, "env_tag": "CoordSokoban", "env_type": "sokoban"}}
+    ctx.env_nums = {"": 1}
+
+    env_outputs = [{
+        "env_id": 0,
+        "group_id": 0,
+        "history": [
+            {"state": "S1", "llm_response": "R1", "reward": 0.1, "actions_left": 5},
+            {"state": "S2", "llm_response": "R2", "reward": 0.2, "actions_left": 4},
+        ],
+        "metrics": {},
+    }]
+
+    lm_inputs: DataProto = ctx.get_lm_inputs(env_outputs, prepare_for_update=True)
+    messages = lm_inputs.non_tensor_batch["messages_list"][-1]
+    user_content = next(msg["content"] for msg in messages if msg["role"] == "user")
+
+    assert "Turn 1 State:" not in user_content
+    assert "Turn 2:" not in user_content
+    assert "actions left" not in user_content
+    assert "Summary: 1 step(s) completed so far." not in user_content
+    assert "State:\nS2\n" in user_content
 
 
 def test_eval_toolcall_compliance_omits_length_prompt_from_context(dummy_config):

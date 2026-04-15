@@ -42,26 +42,39 @@ class SimpleMemory(BaseMemory):
         include_warning: bool,
         format_prompt: str,
         length_prompt: str,
+        max_actions_per_turn: int,
+        no_budget_prompt: bool,
     ) -> str:
         """Build user content using direct concatenation (original method)."""
         content = ""
 
         # Build history section
         if history_start < turn_idx:
-            completed_steps = turn_idx + turn_offset
-            history_length = turn_idx - history_start
-            content += (
-                f"Summary: {completed_steps} step(s) completed so far. "
-                f"Showing the last {history_length} turn(s) with state/action/reward details. "
-            )
-            content += "Recent turns:\n---\n"
+            if no_budget_prompt:
+                content += "Summary: Showing recent state/action/reward details. "
+                content += "Recent history:\n---\n"
+            else:
+                completed_steps = turn_idx + turn_offset
+                history_length = turn_idx - history_start
+                content += (
+                    f"Summary: {completed_steps} step(s) completed so far. "
+                    f"Showing the last {history_length} turn(s) with state/action/reward details. "
+                )
+                content += "Recent turns:\n---\n"
             for h_idx in range(history_start, turn_idx):
-                actual_turn = h_idx + 1 + turn_offset
                 h_turn = history[h_idx]
-                content += f"Turn {actual_turn} State:\n{h_turn.get('state', '')}\n"
-                content += f"Turn {actual_turn} Action: {h_turn.get('llm_response', '')}\n"
+                if no_budget_prompt:
+                    content += f"State:\n{h_turn.get('state', '')}\n"
+                    content += f"Action: {h_turn.get('llm_response', '')}\n"
+                else:
+                    actual_turn = h_idx + 1 + turn_offset
+                    content += f"Turn {actual_turn} State:\n{h_turn.get('state', '')}\n"
+                    content += f"Turn {actual_turn} Action: {h_turn.get('llm_response', '')}\n"
                 if 'reward' in h_turn:
-                    content += f"Turn {actual_turn} Reward: {h_turn['reward']}\n"
+                    if no_budget_prompt:
+                        content += f"Reward: {h_turn['reward']}\n"
+                    else:
+                        content += f"Turn {actual_turn} Reward: {h_turn['reward']}\n"
                 content += "---\n"
 
         # Build current turn section
@@ -73,11 +86,22 @@ class SimpleMemory(BaseMemory):
             warning = "No valid action provided previously. Environment state remains the same. Please try again.\n"
 
         separator = "\n" if content else ""
-        content += f"{separator}{current_turn_prefix}(Turn {actual_turn}):\n"
-        instruction = (
-            f"You have {history[turn_idx]['actions_left']} actions left. Always output: {format_prompt} "
-            "with no extra text. Strictly follow this format."
+        if no_budget_prompt:
+            content += separator
+        else:
+            content += f"{separator}{current_turn_prefix}(Turn {actual_turn}):\n"
+        instruction_parts = []
+        if not no_budget_prompt:
+            instruction_parts.append(
+                f"You have {history[turn_idx]['actions_left']} actions left in total."
+            )
+        instruction_parts.append(
+            f"You may output at most {max_actions_per_turn} action(s) in this turn."
         )
+        instruction_parts.append(
+            f"Always output: {format_prompt} with no extra text. Strictly follow this format."
+        )
+        instruction = " ".join(instruction_parts)
         if length_prompt:
             instruction += f" {length_prompt}"
         content += (

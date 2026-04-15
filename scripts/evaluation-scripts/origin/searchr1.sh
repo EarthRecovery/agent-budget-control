@@ -2,9 +2,9 @@
 set -euo pipefail
 
 eval "$(conda shell.bash hook)"
-conda activate ragen
+conda activate ragenv2
 
-PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/RAGEN-v2"}
+PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/agent-budget-control"}
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
@@ -21,13 +21,45 @@ resolve_path() {
   printf '%s\n' "$path"
 }
 
-# Default model is OpenAI GPT-5.2 Thinking.
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+check_retrieval_server() {
+  local quiet=${1:-false}
+  python - "$RETRIEVAL_SERVER_URL" "$quiet" <<'PY'
+import sys
+import urllib.request
+
+server_url = sys.argv[1].rstrip("/")
+quiet = sys.argv[2].lower() in {"1", "true", "yes", "on"}
+health_url = f"{server_url}/health"
+
+try:
+    with urllib.request.urlopen(health_url, timeout=5) as response:
+        body = response.read().decode()
+        if response.status != 200:
+            raise RuntimeError(f"unexpected status {response.status}: {body}")
+except Exception as exc:
+    print(f"Retrieval health check failed for {health_url}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+if not quiet:
+    print(f"Retrieval health check passed: {health_url}")
+    print(body)
+PY
+}
+
+# Default model is OpenAI GPT-5.2 Instant.
 : "${OPENAI_API_KEY:?Please export OPENAI_API_KEY before running this benchmark.}"
 
 RUN_NAME=${RUN_NAME:-search_r1_api_eval_estimation}
-MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Thinking}
-VAL_GROUPS=${VAL_GROUPS:-512}
-VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-0}
+MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Instant}
+VAL_GROUPS=${VAL_GROUPS:-4}
+VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-50}
 VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-0}
 SEARCH_ENV_TAG=${SEARCH_ENV_TAG:-SearchQA}
 SEARCHR1_DATA_ROOT=${SEARCHR1_DATA_ROOT:-/projects/bflz/searchr1_data}
@@ -35,15 +67,15 @@ SEARCH_DATA_DIR=${SEARCH_DATA_DIR:-${SEARCHR1_DATA_ROOT}/data/search}
 SEARCH_DATA_PATH=${SEARCH_DATA_PATH:-${SEARCH_DATA_DIR}/train.parquet}
 SEARCH_MOCK_MODE=${SEARCH_MOCK_MODE:-False}
 RETRIEVAL_SERVER_URL=${RETRIEVAL_SERVER_URL:-http://127.0.0.1:8000}
-MAX_TURN=${MAX_TURN:-5}
+MAX_TURN=${MAX_TURN:-10}
 MAX_ACTIONS_PER_TURN=${MAX_ACTIONS_PER_TURN:-1}
 MAX_ACTIONS_PER_TRAJ=${MAX_ACTIONS_PER_TRAJ:-10}
 MAX_TOKENS=${MAX_TOKENS:-2048}
-MAX_MODEL_LEN=${MAX_MODEL_LEN:-5000}
-MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-5000}
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-50000}
+MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-50000}
 PROMPT_TOKEN_MARGIN=${PROMPT_TOKEN_MARGIN:-1024}
-RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/budget-estimation-benchmark"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/search-r1-512-gpt5.2-Thinking"}
+RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/estimation"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/searchr1-origin-gpt5.2-instant-4-test3"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 
 DEFAULT_SEARCH_DATA_PATH=$(resolve_path "${SEARCH_DATA_DIR}/train.parquet")
@@ -60,13 +92,25 @@ if [[ ! -f "$SEARCH_DATA_PATH" ]]; then
   fi
 fi
 
+if ! is_truthy "$SEARCH_MOCK_MODE"; then
+  if ! check_retrieval_server; then
+    echo "Retrieval server is required when SEARCH_MOCK_MODE=False." >&2
+    echo "Start it separately with:" >&2
+    echo "  bash scripts/evaluation-scripts/origin/searchr1_server.sh start" >&2
+    echo "Inspect progress/status with:" >&2
+    echo "  bash scripts/evaluation-scripts/origin/searchr1_server.sh status" >&2
+    echo "View server logs with:" >&2
+    echo "  bash scripts/evaluation-scripts/origin/searchr1_server.sh logs" >&2
+    echo "Or rerun with SEARCH_MOCK_MODE=True to use mock retrieval." >&2
+    exit 1
+  fi
+fi
+
 mkdir -p "$OUTPUT_DIR" "$HYDRA_DIR"
 
 python -m ragen.eval_api --config-name evaluate_api_llm \
   model_config.model_name="${MODEL_NAME}" \
   agent_proxy.enable_think=True \
-  "agent_proxy.eval-estimation-single=False" \
-  "agent_proxy.eval-estimation-multi=True" \
   agent_proxy.max_turn=${MAX_TURN} \
   agent_proxy.max_actions_per_turn=${MAX_ACTIONS_PER_TURN} \
   es_manager.val.env_groups=${VAL_GROUPS} \
@@ -85,8 +129,8 @@ python -m ragen.eval_api --config-name evaluate_api_llm \
   actor_rollout_ref.rollout.max_num_batched_tokens=${MAX_BATCHED_TOKENS} \
   actor_rollout_ref.rollout.response_length=${MAX_TOKENS} \
   model_config.prompt_token_margin=${PROMPT_TOKEN_MARGIN} \
-  output.dir="${OUTPUT_DIR}" \
-  output.filename="${RUN_NAME}.pkl" \
-  output.append_timestamp=True \
-  hydra.run.dir="${HYDRA_DIR}" \
-  hydra.output_subdir=null
+  "output.dir='${OUTPUT_DIR}'" \
+  "output.filename='${RUN_NAME}.pkl'" \
+  "output.append_timestamp=True" \
+  "hydra.run.dir='${HYDRA_DIR}'" \
+  "hydra.output_subdir=null"

@@ -18,6 +18,13 @@ from huggingface_hub import hf_hub_download
 from tqdm import tqdm
 
 
+DEFAULT_SEARCHR1_DATA_ROOT = os.environ.get(
+    "SEARCHR1_DATA_ROOT",
+    "/projects/bflz/searchr1_data",
+)
+DEFAULT_INDEX_ROOT = os.path.join(DEFAULT_SEARCHR1_DATA_ROOT, "search_data")
+
+
 def download_wikipedia_corpus(save_path: str):
     print("Downloading Wikipedia corpus from PeterJinGo/wiki-18-corpus...")
 
@@ -127,7 +134,7 @@ def download_prebuilt_indices(save_path: str):
         return None
 
 
-def setup_search_data(data_dir: str = "./search_data", max_docs: int | None = None):
+def setup_search_data(data_dir: str = DEFAULT_INDEX_ROOT, max_docs: int | None = None):
     print(f"Setting up Search data (dense-only) in {data_dir}")
 
     Path(data_dir).mkdir(parents=True, exist_ok=True)
@@ -153,16 +160,16 @@ def setup_search_data(data_dir: str = "./search_data", max_docs: int | None = No
     if summary["setup_complete"]:
         print("\nNext steps:")
         print("1. Launch dense retrieval server:")
-        print("   cd examples/search && bash retrieval/launch_server.sh ./search_data/prebuilt_indices 8000")
-        print("2. Start training:")
-        print("   cd examples/search && python train_search_agent.py")
+        print("   bash scripts/retrieval/launch_server.sh")
+        print("2. Prepare HotpotQA parquet files:")
+        print("   python scripts/prepare_search_data.py")
 
     return summary
 
 
 def main():
     parser = argparse.ArgumentParser(description="Download Search training data & dense indices")
-    parser.add_argument("--data_dir", default="./search_data", help="Directory to save data")
+    parser.add_argument("--data_dir", default=DEFAULT_INDEX_ROOT, help="Directory to save data")
     parser.add_argument("--max_docs", type=int, help="Limit number of docs (for quick dev)")
 
     args = parser.parse_args()

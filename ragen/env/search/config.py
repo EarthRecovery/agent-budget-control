@@ -6,7 +6,21 @@ The search environment is adapted from the RLLM project:
   License: Apache-2.0
 """
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
+
+
+DEFAULT_SEARCHR1_DATA_ROOT = os.environ.get(
+    "SEARCHR1_DATA_ROOT",
+    "/projects/bflz/searchr1_data",
+)
+
+
+def _default_train_path() -> str:
+    return os.environ.get(
+        "SEARCHR1_TRAIN_PATH",
+        os.path.join(DEFAULT_SEARCHR1_DATA_ROOT, "data", "search", "train.parquet"),
+    )
 
 
 @dataclass
@@ -18,7 +32,7 @@ class SearchEnvConfig:
 
     # --- Data ---
     dataset_name: str = "hotpotqa"
-    train_path: str = "data/search/train.parquet"
+    train_path: str = field(default_factory=_default_train_path)
     max_instances: int = 20000
 
     # --- Retrieval server ---

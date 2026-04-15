@@ -29,6 +29,8 @@ class BaseMemory(ABC):
         include_warning: bool,
         format_prompt: str,
         length_prompt: str,
+        max_actions_per_turn: int,
+        no_budget_prompt: bool,
     ) -> str:
         """
         Build user content for single-turn format.
@@ -42,6 +44,8 @@ class BaseMemory(ABC):
             include_warning: Whether to include invalid action warning
             format_prompt: Format instruction string (e.g., "<think>...</think><answer>...</answer>")
             length_prompt: Length instruction string
+            max_actions_per_turn: Maximum number of actions the model may output in a single turn
+            no_budget_prompt: Whether to suppress turn-count and action-budget text in the prompt
 
         Returns:
             Formatted user content string

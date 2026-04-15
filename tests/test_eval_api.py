@@ -1,7 +1,12 @@
 from omegaconf import OmegaConf
 
 from ragen.eval_api_utils import clone_config_for_val_chunk, iter_val_rollout_chunks
-from ragen.llm_agent.eval_config import expand_compliance_group_size, resolve_rollout_max_turn
+from ragen.llm_agent.eval_config import (
+    expand_compliance_group_size,
+    resolve_effective_rollout_max_turn,
+    resolve_rollout_max_turn,
+    resolve_rollout_truncation_mode,
+)
 
 
 def _make_config():
@@ -68,6 +73,27 @@ def test_resolve_rollout_max_turn_keeps_agent_proxy_max_turn_in_compliance_mode(
     )
 
     assert resolve_rollout_max_turn(config) == 9
+
+
+def test_resolve_rollout_truncation_mode_defaults_to_turn():
+    config = OmegaConf.create({"agent_proxy": {}})
+
+    assert resolve_rollout_truncation_mode(config) == "turn"
+    assert resolve_effective_rollout_max_turn(config) == 1
+
+
+def test_resolve_effective_rollout_max_turn_disables_turn_cap_in_token_mode():
+    config = OmegaConf.create(
+        {
+            "agent_proxy": {
+                "truncation_mode": "token",
+                "max_turn": 9,
+            }
+        }
+    )
+
+    assert resolve_rollout_truncation_mode(config) == "token"
+    assert resolve_effective_rollout_max_turn(config) is None
 
 
 def test_expand_compliance_group_size_multiplies_val_and_train_group_size_once():

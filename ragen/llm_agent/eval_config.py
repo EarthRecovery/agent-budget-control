@@ -307,6 +307,22 @@ def resolve_rollout_max_turn(config) -> int:
     return max(1, int(agent_proxy_cfg_get(config, "max_turn", 1) or 1))
 
 
+def resolve_rollout_truncation_mode(config) -> str:
+    raw_mode = agent_proxy_cfg_get(config, "truncation_mode", "turn")
+    mode = str(raw_mode or "turn").strip().lower()
+    if mode not in {"turn", "token"}:
+        raise ValueError(
+            f"agent_proxy.truncation_mode must be 'turn' or 'token'. Got {raw_mode!r}."
+        )
+    return mode
+
+
+def resolve_effective_rollout_max_turn(config) -> Optional[int]:
+    if resolve_rollout_truncation_mode(config) == "token":
+        return None
+    return resolve_rollout_max_turn(config)
+
+
 def expand_compliance_group_size(config) -> None:
     compliance_mode = resolve_eval_compliance_mode(config)
     if compliance_mode is None:

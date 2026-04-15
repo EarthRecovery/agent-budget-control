@@ -287,6 +287,72 @@ class EnvStateManager:
         self._turn_idx = 1
         return rollout_cache
 
+    def _get_rollout_truncation_mode(self) -> str:
+        agent_cfg = getattr(self.sys_config, "agent_proxy", None)
+        raw_mode = getattr(agent_cfg, "truncation_mode", "turn") if agent_cfg is not None else "turn"
+        mode = str(raw_mode or "turn").strip().lower()
+        if mode not in {"turn", "token"}:
+            raise ValueError(
+                f"agent_proxy.truncation_mode must be 'turn' or 'token', got {raw_mode!r}."
+            )
+        return mode
+
+    def _get_max_context_token_limit(self) -> Optional[int]:
+        agent_cfg = getattr(self.sys_config, "agent_proxy", None)
+        raw_limit = getattr(agent_cfg, "max_context_token", None) if agent_cfg is not None else None
+        if raw_limit in (None, ""):
+            return None
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"agent_proxy.max_context_token must be an integer, got {raw_limit!r}."
+            ) from exc
+        return limit if limit > 0 else None
+
+    @staticmethod
+    def _safe_nonnegative_int(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _extract_record_total_tokens(cls, record: Dict[str, Any]) -> int:
+        total_tokens = record.get("api_total_tokens", record.get("total_tokens"))
+        if total_tokens is not None:
+            return cls._safe_nonnegative_int(total_tokens)
+        input_tokens = record.get("api_input_tokens", record.get("input_tokens"))
+        output_tokens = record.get("api_output_tokens", record.get("output_tokens"))
+        if input_tokens is not None or output_tokens is not None:
+            return cls._safe_nonnegative_int(input_tokens) + cls._safe_nonnegative_int(output_tokens)
+        return cls._safe_nonnegative_int(record.get("token_count"))
+
+    def _resolve_context_token_truncation(
+        self,
+        history: List[Dict[str, Any]],
+        env_input: Dict[str, Any],
+    ) -> Optional[Dict[str, int]]:
+        if self._get_rollout_truncation_mode() != "token":
+            return None
+        max_context_token = self._get_max_context_token_limit()
+        if max_context_token is None:
+            return None
+
+        used_before_turn = sum(self._extract_record_total_tokens(turn) for turn in history)
+        current_turn_total = self._extract_record_total_tokens(env_input)
+        used_after_turn = used_before_turn + current_turn_total
+        if current_turn_total <= max_context_token:
+            return None
+
+        return {
+            "context_token_limit": int(max_context_token),
+            "context_tokens_used_before_turn": int(used_before_turn),
+            "context_tokens_used_this_turn": int(current_turn_total),
+            "context_tokens_used_after_turn": int(used_after_turn),
+            "context_token_delta": int(current_turn_total - max_context_token),
+        }
+
     def step(self, all_env_inputs: List[Dict]):
         """Step the environments.
         1. extract valid actions from the action lookup table (if exists) and execute the actions, and update rollout cache
@@ -367,6 +433,9 @@ class EnvStateManager:
                 'llm_error_code': env_input.get('llm_error_code'),
                 'llm_error_status_code': env_input.get('llm_error_status_code'),
                 'llm_error_retryable': env_input.get('llm_error_retryable'),
+                'api_input_tokens': env_input.get('input_tokens'),
+                'api_output_tokens': env_input.get('output_tokens'),
+                'api_total_tokens': env_input.get('total_tokens'),
                 'action_points_used': int(action_points_used),
                 'budget_enabled': bool(budget_enabled),
                 'budget_max': budget_max,
@@ -392,25 +461,48 @@ class EnvStateManager:
             env_id, env = entry['env_id'], entry['env']
             actions_left_before = entry['max_actions_per_traj'] - entry['status'].num_actions
 
-            # execute actions in envs
-            valid_actions = self._extract_map_valid_actions(entry, env_input['actions'])
-            (
-                acc_reward,
-                turn_info,
-                turn_done,
-                executed_actions,
-                action_points_used,
-                budget_enabled,
-                budget_max,
-                budget_remaining,
-            ) = _execute_actions(env, valid_actions[:actions_left_before])
-            no_manager_action = len(valid_actions) == 0
-            penalty_delta = 0.0
-            if len(valid_actions) != len(env_input['actions']) or not valid_actions:
-                penalty_delta = self.sys_config.es_manager.format_penalty
-            if no_manager_action:
-                turn_info = dict(turn_info)
-                turn_info['manager_invalid_action'] = True
+            context_token_truncation = self._resolve_context_token_truncation(
+                self.rollout_cache[env_id]['history'],
+                env_input,
+            )
+
+            if context_token_truncation is not None:
+                valid_actions = []
+                executed_actions = []
+                action_points_used = 0
+                budget_enabled = False
+                budget_max = None
+                budget_remaining = None
+                acc_reward = 0.0
+                turn_done = True
+                turn_info = {
+                    "success": False,
+                    "context_token_truncated": True,
+                    "truncation_mode": "token",
+                    **context_token_truncation,
+                }
+                no_manager_action = False
+                penalty_delta = 0.0
+            else:
+                # execute actions in envs
+                valid_actions = self._extract_map_valid_actions(entry, env_input['actions'])
+                (
+                    acc_reward,
+                    turn_info,
+                    turn_done,
+                    executed_actions,
+                    action_points_used,
+                    budget_enabled,
+                    budget_max,
+                    budget_remaining,
+                ) = _execute_actions(env, valid_actions[:actions_left_before])
+                no_manager_action = len(valid_actions) == 0
+                penalty_delta = 0.0
+                if len(valid_actions) != len(env_input['actions']) or not valid_actions:
+                    penalty_delta = self.sys_config.es_manager.format_penalty
+                if no_manager_action:
+                    turn_info = dict(turn_info)
+                    turn_info['manager_invalid_action'] = True
 
             status, history = _log_env_state(
                 entry['status'],
@@ -430,6 +522,14 @@ class EnvStateManager:
             )
             if no_manager_action and history:
                 history[-1]['manager_invalid_action'] = True
+            if context_token_truncation is not None:
+                status.truncated = True
+                status.terminated = True
+                self._debug_reward(
+                    f"context_token_truncate env_id={env_id}, "
+                    f"used_after_turn={context_token_truncation['context_tokens_used_after_turn']}, "
+                    f"limit={context_token_truncation['context_token_limit']}"
+                )
             if status.num_actions >= entry['max_actions_per_traj'] and not turn_done:
                 status.truncated = True
                 status.terminated = True

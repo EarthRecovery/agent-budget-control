@@ -10,7 +10,7 @@ Downloads HotpotQA from HuggingFace and saves as parquet files with columns:
 Usage:
     python scripts/prepare_search_data.py
     python scripts/prepare_search_data.py --train_size 20000 --test_size 1000
-    python scripts/prepare_search_data.py --output_dir data/search
+    python scripts/prepare_search_data.py --output_dir /projects/bflz/searchr1_data/data/search
 """
 
 import argparse
@@ -20,7 +20,14 @@ import pandas as pd
 from datasets import load_dataset
 
 
-def prepare_hotpotqa(output_dir: str = "data/search", train_size: int = None, test_size: int = None):
+DEFAULT_SEARCHR1_DATA_ROOT = os.environ.get(
+    "SEARCHR1_DATA_ROOT",
+    "/projects/bflz/searchr1_data",
+)
+DEFAULT_OUTPUT_DIR = os.path.join(DEFAULT_SEARCHR1_DATA_ROOT, "data", "search")
+
+
+def prepare_hotpotqa(output_dir: str = DEFAULT_OUTPUT_DIR, train_size: int = None, test_size: int = None):
     """Download HotpotQA and convert to parquet format for RAGEN."""
 
     os.makedirs(output_dir, exist_ok=True)
@@ -73,7 +80,7 @@ def prepare_hotpotqa(output_dir: str = "data/search", train_size: int = None, te
 
 def main():
     parser = argparse.ArgumentParser(description="Prepare HotpotQA data for RAGEN Search environment")
-    parser.add_argument("--output_dir", default="data/search", help="Output directory for parquet files")
+    parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR, help="Output directory for parquet files")
     parser.add_argument("--train_size", type=int, default=None, help="Max train examples (default: all ~90k)")
     parser.add_argument("--test_size", type=int, default=None, help="Max test examples (default: all ~7k)")
     args = parser.parse_args()

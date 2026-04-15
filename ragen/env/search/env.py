@@ -247,7 +247,10 @@ class SearchEnv(BaseLanguageBasedEnv, gym.Env):
 if __name__ == "__main__":
     # Quick smoke test with mock mode
     config = SearchEnvConfig(
-        train_path="data/search/train.parquet",
+        train_path=os.environ.get(
+            "SEARCHR1_TRAIN_PATH",
+            "/projects/bflz/searchr1_data/data/search/train.parquet",
+        ),
         mock_mode=True,
         max_steps=5,
     )

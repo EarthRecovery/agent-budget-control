@@ -145,6 +145,9 @@ class ContextManager:
     def _eval_compliance_enabled(self) -> bool:
         return self._get_eval_compliance_mode() is not None
 
+    def _no_budget_prompt_enabled(self) -> bool:
+        return bool(self._agent_proxy_get("no_budget_prompt", False))
+
     def _get_generation_prefix(self) -> str:
         eval_estimation_mode = self._get_eval_estimation_mode()
         if eval_estimation_mode in {"single", "multi", "toolcall", "adaptation_turn"}:
@@ -231,7 +234,14 @@ class ContextManager:
                 env_instruction += coord_hint
             if self._should_include_action_lookup(env_config_new):
                 action_lookup_str = "\nYour available actions are:\n" + ", ".join([f"{v}" for k, v in env_config_new["action_lookup"].items()])
-                action_lookup_str += f"\nYou can make up to {env_config_new['max_actions_per_traj']} actions, separated by the action separator \" " + self.action_sep + " \"\n"
+                action_lookup_str += (
+                    f"\nYou may output at most {self.config.agent_proxy.max_actions_per_turn} action(s) in a single turn, "
+                    f"separated by the action separator \" {self.action_sep} \"."
+                )
+                if not self._no_budget_prompt_enabled():
+                    action_lookup_str += (
+                        f"\nYou can make up to {env_config_new['max_actions_per_traj']} actions total across the full trajectory.\n"
+                    )
                 env_instruction += action_lookup_str
             prefixes[env_tag] = env_instruction
             env_config_lookup[env_tag] = {
@@ -649,6 +659,18 @@ class ContextManager:
 
     # ==================== Message Building Functions ====================
 
+    def _build_turn_action_instruction(self, actions_left: int, format_prompt: str) -> str:
+        instruction_parts = []
+        if not self._no_budget_prompt_enabled():
+            instruction_parts.append(f"You have {actions_left} actions left in total.")
+        instruction_parts.append(
+            f"You may output at most {self.config.agent_proxy.max_actions_per_turn} action(s) in this turn."
+        )
+        instruction_parts.append(
+            f"Always output: {format_prompt} with no extra text. Strictly follow this format."
+        )
+        return " ".join(instruction_parts)
+
     def _build_format_prompt(self, env_id: int) -> Tuple[str, str]:
         """Build FORMAT_PROMPT and LENGTH_PROMPT for an environment."""
         answer_format = (
@@ -787,14 +809,13 @@ class ContextManager:
         if include_warning and turn.get('manager_invalid_action'):
             warning = "No valid action provided previously. Environment state remains the same. Please try again.\n"
 
-        instruction = (
-            f"You have {turn['actions_left']} actions left. Always output: {FORMAT_PROMPT} "
-            "with no extra text. Strictly follow this format."
-        )
+        instruction = self._build_turn_action_instruction(turn['actions_left'], FORMAT_PROMPT)
         if LENGTH_PROMPT:
             instruction += f" {LENGTH_PROMPT}"
 
-        content = f"\nTurn {turn_number}:\n"
+        content = "\n"
+        if not self._no_budget_prompt_enabled():
+            content += f"Turn {turn_number}:\n"
         content += (
             f"State:\n{turn['state']}\n{warning}"
             f"{instruction}\n"
@@ -1055,6 +1076,8 @@ class ContextManager:
             include_warning=include_warning,
             format_prompt=FORMAT_PROMPT,
             length_prompt=LENGTH_PROMPT,
+            max_actions_per_turn=self.config.agent_proxy.max_actions_per_turn,
+            no_budget_prompt=self._no_budget_prompt_enabled(),
         )
 
     def _build_single_turn_samples(self, env_outputs: List[Dict]) -> DataProto:
@@ -1590,6 +1613,20 @@ class ContextManager:
             response_errors = response_errors.tolist()
         else:
             response_errors = list(response_errors)
+        api_usages = lm_outputs.non_tensor_batch.get("api_usages")
+        if api_usages is None:
+            api_usages = [None] * len(raw_responses)
+        elif hasattr(api_usages, "tolist"):
+            api_usages = api_usages.tolist()
+        else:
+            api_usages = list(api_usages)
+        prompt_token_counts = lm_outputs.non_tensor_batch.get("prompt_token_counts")
+        if prompt_token_counts is None:
+            prompt_token_counts = [None] * len(raw_responses)
+        elif hasattr(prompt_token_counts, "tolist"):
+            prompt_token_counts = prompt_token_counts.tolist()
+        else:
+            prompt_token_counts = list(prompt_token_counts)
         responses = [
             self._ensure_generation_prefix(response) if response_errors[idx] is None else ""
             for idx, response in enumerate(responses)
@@ -1599,6 +1636,7 @@ class ContextManager:
         env_inputs = []
         for idx, (env_id, response, raw_response) in enumerate(zip(env_ids, responses, raw_responses)):
             response_error = response_errors[idx] if idx < len(response_errors) else None
+            usage = api_usages[idx] if idx < len(api_usages) else None
             if response_error is None:
                 llm_response, actions = self._parse_response(response)
             else:
@@ -1609,12 +1647,36 @@ class ContextManager:
                 token_count = len(str(raw_response).split())
             if response_error is not None:
                 token_count = 0
+            prompt_token_count = prompt_token_counts[idx] if idx < len(prompt_token_counts) else None
+            try:
+                input_tokens = None if usage is None else usage.get("input_tokens")
+            except Exception:
+                input_tokens = None
+            try:
+                output_tokens = None if usage is None else usage.get("output_tokens")
+            except Exception:
+                output_tokens = None
+            try:
+                total_tokens = None if usage is None else usage.get("total_tokens")
+            except Exception:
+                total_tokens = None
+            if input_tokens is None:
+                input_tokens = prompt_token_count
+            if output_tokens is None:
+                output_tokens = token_count
+            if total_tokens is None:
+                input_tokens_int = int(input_tokens) if input_tokens is not None else 0
+                output_tokens_int = int(output_tokens) if output_tokens is not None else 0
+                total_tokens = input_tokens_int + output_tokens_int
             env_inputs.append({
                 "env_id": env_id,
                 "llm_raw_response": raw_response,
                 "llm_response": llm_response,
                 "actions": actions,
                 "response_tokens": token_count,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
                 "llm_error": None if response_error is None else response_error.get("error"),
                 "llm_error_type": None if response_error is None else response_error.get("error_type"),
                 "llm_error_code": None if response_error is None else response_error.get("error_code"),

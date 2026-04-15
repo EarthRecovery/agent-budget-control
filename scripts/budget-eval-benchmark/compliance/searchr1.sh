@@ -30,7 +30,9 @@ VAL_GROUPS=${VAL_GROUPS:-1}
 VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-0}
 VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-0}
 SEARCH_ENV_TAG=${SEARCH_ENV_TAG:-SearchQA}
-SEARCH_DATA_PATH=${SEARCH_DATA_PATH:-data/search/train.parquet}
+SEARCHR1_DATA_ROOT=${SEARCHR1_DATA_ROOT:-/projects/bflz/searchr1_data}
+SEARCH_DATA_DIR=${SEARCH_DATA_DIR:-${SEARCHR1_DATA_ROOT}/data/search}
+SEARCH_DATA_PATH=${SEARCH_DATA_PATH:-${SEARCH_DATA_DIR}/train.parquet}
 SEARCH_MOCK_MODE=${SEARCH_MOCK_MODE:-False}
 RETRIEVAL_SERVER_URL=${RETRIEVAL_SERVER_URL:-http://127.0.0.1:8000}
 MAX_TURN=${MAX_TURN:-5}
@@ -44,16 +46,16 @@ RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/budget-estimation-benchmark"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/searchr1-compliance-turn-gpt5.2-thinking-1-test"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 
-DEFAULT_SEARCH_DATA_PATH=$(resolve_path "data/search/train.parquet")
+DEFAULT_SEARCH_DATA_PATH=$(resolve_path "${SEARCH_DATA_DIR}/train.parquet")
 SEARCH_DATA_PATH=$(resolve_path "$SEARCH_DATA_PATH")
 
 if [[ ! -f "$SEARCH_DATA_PATH" ]]; then
   if [[ "$SEARCH_DATA_PATH" == "$DEFAULT_SEARCH_DATA_PATH" ]]; then
-    echo "Search dataset not found at $SEARCH_DATA_PATH. Preparing HotpotQA parquet files under $PROJECT_ROOT/data/search ..."
-    python scripts/prepare_search_data.py --output_dir "$PROJECT_ROOT/data/search"
+    echo "Search dataset not found at $SEARCH_DATA_PATH. Preparing HotpotQA parquet files under $SEARCH_DATA_DIR ..."
+    python scripts/prepare_search_data.py --output_dir "$SEARCH_DATA_DIR"
   else
     echo "Search dataset not found at $SEARCH_DATA_PATH." >&2
-    echo "Set SEARCH_DATA_PATH to an existing parquet file, or run: python scripts/prepare_search_data.py --output_dir $PROJECT_ROOT/data/search" >&2
+    echo "Set SEARCH_DATA_PATH to an existing parquet file, or run: python scripts/prepare_search_data.py --output_dir $SEARCH_DATA_DIR" >&2
     exit 1
   fi
 fi

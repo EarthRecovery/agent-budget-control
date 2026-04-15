@@ -77,6 +77,9 @@ class CtxManagerWrapper:
     def _eval_compliance_enabled(self) -> bool:
         return self._get_eval_compliance_mode() is not None
 
+    def _no_budget_prompt_enabled(self) -> bool:
+        return bool(self._agent_proxy_get("no_budget_prompt", False))
+
     def _normalize_eval_compliance_scope(
         self,
         raw_scope: Any,
@@ -206,6 +209,9 @@ class CtxManagerWrapper:
 
     def _eval_logging_enabled(self) -> bool:
         return self._get_active_eval_log_mode() is not None
+
+    def _no_budget_prompt_enabled(self) -> bool:
+        return bool(self._agent_proxy_get("no_budget_prompt", False))
 
     def _output_filename_configured(self) -> bool:
         output_cfg = getattr(self.config, "output", None)
@@ -1494,6 +1500,8 @@ class CtxManagerWrapper:
         messages_list: List[List[Dict]],
         budget_turns: List[Optional[int]],
     ) -> None:
+        if self._no_budget_prompt_enabled():
+            return
         current_turn = self.turn_idx + 1
         for messages, budget_turn in zip(messages_list, budget_turns):
             if budget_turn is None:
@@ -1653,6 +1661,8 @@ class CtxManagerWrapper:
         self,
         messages_list: List[List[Dict]],
     ) -> None:
+        if self._no_budget_prompt_enabled():
+            return
         current_turn = int(self.turn_idx + 1)
         adaptation_turn_limit = self._get_eval_adaptation_turn_limit(current_turn=current_turn)
         if adaptation_turn_limit is None:
@@ -1778,6 +1788,8 @@ class CtxManagerWrapper:
         env_ids: List[Any],
         group_ids: Optional[List[Any]] = None,
     ) -> None:
+        if self._no_budget_prompt_enabled():
+            return
         if group_ids is None:
             group_ids = [None] * len(messages_list)
         current_turn = int(self.turn_idx + 1)
@@ -1874,6 +1886,8 @@ class CtxManagerWrapper:
         self,
         messages_list: List[List[Dict]],
     ) -> None:
+        if self._no_budget_prompt_enabled():
+            return
         benchmark_cfg = getattr(self.config.agent_proxy, "benchmark_factors", None)
         enabled = bool(getattr(benchmark_cfg, "enabled", False)) if benchmark_cfg is not None else False
         mode = str(getattr(benchmark_cfg, "mode", "turn")).strip().lower() if benchmark_cfg is not None else "turn"

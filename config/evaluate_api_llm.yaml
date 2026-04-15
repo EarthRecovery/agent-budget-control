@@ -135,6 +135,7 @@ agent_proxy:
   ctx_log: True
   enable_es_wrapper: True
   debug_reward_flow: False
+  no_budget_prompt: False
   "eval-estimation-single": False
   "eval-estimation-multi": False
   "eval-estimation-toolcall": False

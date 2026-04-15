@@ -8,11 +8,12 @@ This code is adapted from the RLLM project:
   License: Apache-2.0
 
 Usage:
-    python server.py --data_dir ./search_data/prebuilt_indices --port 8000
+    python server.py --data_dir /projects/bflz/searchr1_data/search_data/prebuilt_indices --port 8000
 """
 
 import argparse
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,13 @@ import torch
 import faiss
 from flask import Flask, jsonify, request
 from sentence_transformers import SentenceTransformer
+
+
+DEFAULT_SEARCHR1_DATA_ROOT = os.environ.get(
+    "SEARCHR1_DATA_ROOT",
+    "/projects/bflz/searchr1_data",
+)
+DEFAULT_INDEX_DIR = os.path.join(DEFAULT_SEARCHR1_DATA_ROOT, "search_data", "prebuilt_indices")
 
 
 class LocalRetriever:
@@ -102,7 +110,7 @@ def retrieve():
 
 def main():
     parser = argparse.ArgumentParser(description="Dense-only retrieval server")
-    parser.add_argument("--data_dir", default="./search_data/prebuilt_indices", help="Directory containing corpus and dense index")
+    parser.add_argument("--data_dir", default=DEFAULT_INDEX_DIR, help="Directory containing corpus and dense index")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")

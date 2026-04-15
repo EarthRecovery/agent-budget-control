@@ -87,6 +87,8 @@ class AlfWorldMemory(BaseMemory):
         include_warning: bool,
         format_prompt: str,
         length_prompt: str,
+        max_actions_per_turn: int,
+        no_budget_prompt: bool,
     ) -> str:
         """Build user content using verl-agent style compact format."""
         env_id = env_output.get("env_id", 0)
@@ -103,7 +105,7 @@ class AlfWorldMemory(BaseMemory):
 
         # 2. Step count summary
         total_steps = turn_idx + turn_offset
-        if total_steps > 0:
+        if total_steps > 0 and not no_budget_prompt:
             content_parts.append(
                 f"Prior to this step, you have already taken {total_steps} step(s)."
             )
@@ -118,7 +120,6 @@ class AlfWorldMemory(BaseMemory):
 
             for h_idx in range(history_start, turn_idx):
                 h_turn = history[h_idx]
-                actual_turn = h_idx + 1 + turn_offset
 
                 # Clean observation
                 clean_obs = self._clean_observation(h_turn.get('state', ''))
@@ -129,17 +130,26 @@ class AlfWorldMemory(BaseMemory):
                 # Extract action from response
                 action = self._extract_action_from_response(h_turn.get('llm_response', ''))
 
-                content_parts.append(
-                    f"[Observation {actual_turn}: '{clean_obs}', Action {actual_turn}: '{action}']"
-                )
+                if no_budget_prompt:
+                    content_parts.append(
+                        f"[Observation: '{clean_obs}', Action: '{action}']"
+                    )
+                else:
+                    actual_turn = h_idx + 1 + turn_offset
+                    content_parts.append(
+                        f"[Observation {actual_turn}: '{clean_obs}', Action {actual_turn}: '{action}']"
+                    )
 
         # 4. Current step and observation
         current_turn = turn_idx + 1 + turn_offset
         current_state = history[turn_idx].get('state', '')
         clean_current = self._clean_observation(current_state)
-        content_parts.append(
-            f"You are now at step {current_turn} and your current observation is: {clean_current}"
-        )
+        if no_budget_prompt:
+            content_parts.append(f"Your current observation is: {clean_current}")
+        else:
+            content_parts.append(
+                f"You are now at step {current_turn} and your current observation is: {clean_current}"
+            )
 
         # 5. Current admissible actions
         admissible = self._extract_admissible_actions(current_state)
@@ -155,11 +165,13 @@ class AlfWorldMemory(BaseMemory):
             )
 
         # 7. Format instructions
-        instruction = (
-            f"Now it's your turn to take an action. "
-            f"You have {history[turn_idx]['actions_left']} actions left. "
-            f"Always output: {format_prompt} with no extra text."
-        )
+        instruction_parts = ["Now it's your turn to take an action."]
+        if not no_budget_prompt:
+            instruction_parts.append(
+                f"You have {history[turn_idx]['actions_left']} actions left."
+            )
+        instruction_parts.append(f"Always output: {format_prompt} with no extra text.")
+        instruction = " ".join(instruction_parts)
         if length_prompt:
             instruction += f" {length_prompt}"
         content_parts.append(

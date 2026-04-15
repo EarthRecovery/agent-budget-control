@@ -6,7 +6,7 @@ hydra:
     - pkg://verl.trainer.config
 
 # NOTE: Before training, start the retrieval server:
-#   bash scripts/retrieval/launch_server.sh ./search_data/prebuilt_indices 8000
+#   SEARCHR1_DATA_ROOT=/projects/bflz/searchr1_data bash scripts/retrieval/launch_server.sh
 
 micro_batch_size_per_gpu: 4
 ppo_mini_batch_size: 32

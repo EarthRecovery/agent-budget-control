@@ -66,9 +66,11 @@ setup_search() {
     print_step "Installing search environment dependencies..."
     python -m pip install sentence-transformers flask
 
-    local DATA_DIR="./search_data"
+    local SEARCHR1_DATA_ROOT="${SEARCHR1_DATA_ROOT:-/projects/bflz/searchr1_data}"
+    local DATA_DIR="${SEARCHR1_DATA_ROOT}/search_data"
     local INDICES_DIR="${DATA_DIR}/prebuilt_indices"
     local WIKI_DIR="${DATA_DIR}/wikipedia"
+    local HOTPOT_DIR="${SEARCHR1_DATA_ROOT}/data/search"
 
     print_step "Downloading search index data (wiki corpus + FAISS index shards, ~87 GB)..."
     python scripts/download_search_index.py --data_dir "$DATA_DIR"
@@ -132,11 +134,11 @@ print(f'Done! corpus.json = {len(corpus)} docs')
 
     # Prepare HotpotQA parquet data
     print_step "Preparing HotpotQA parquet data..."
-    python scripts/prepare_search_data.py --output_dir data/search
+    python scripts/prepare_search_data.py --output_dir "$HOTPOT_DIR"
 
     print_step "Search environment setup complete"
     echo "To start the retrieval server:"
-    echo "  CUDA_VISIBLE_DEVICES='' python scripts/retrieval/server.py --port 8001"
+    echo "  bash scripts/retrieval/launch_server.sh"
 }
 
 main() {

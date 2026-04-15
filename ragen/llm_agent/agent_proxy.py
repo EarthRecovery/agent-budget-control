@@ -13,8 +13,9 @@ from verl.protocol import pad_dataproto_to_divisor, unpad_dataproto
 from .base_llm import ConcurrentLLM
 from .eval_config import (
     expand_compliance_group_size,
+    resolve_effective_rollout_max_turn,
     resolve_eval_estimation_mode,
-    resolve_rollout_max_turn,
+    resolve_rollout_truncation_mode,
 )
 import time
 from hydra.utils import to_absolute_path
@@ -45,7 +46,8 @@ def _get_rollout_do_sample(config) -> bool:
     )
 
 
-_resolve_rollout_max_turn = resolve_rollout_max_turn
+_resolve_effective_rollout_max_turn = resolve_effective_rollout_max_turn
+_resolve_rollout_truncation_mode = resolve_rollout_truncation_mode
 
 
 class VllmWrapperWg:  # Thi is a developing class for eval and test
@@ -245,12 +247,14 @@ class ApiCallingWrapperWg:
         api_usages = [None] * len(messages_list)
         active_indices = list(range(len(messages_list)))
         active_messages_list = messages_list
+        prompt_token_counts = [None] * len(messages_list)
 
         attention_mask = None
         if getattr(lm_inputs, "batch", None) is not None:
             attention_mask = lm_inputs.batch.get("attention_mask")
-        if attention_mask is not None and self.prompt_token_budget is not None:
+        if attention_mask is not None:
             prompt_token_counts = attention_mask.sum(dim=-1).tolist()
+        if attention_mask is not None and self.prompt_token_budget is not None:
             active_indices = []
             active_messages_list = []
             for idx, messages in enumerate(messages_list):
@@ -335,6 +339,7 @@ class ApiCallingWrapperWg:
             "response_errors": np.array(response_errors, dtype=object),
             "api_interactions": np.array(api_interactions, dtype=object),
             "api_usages": np.array(api_usages, dtype=object),
+            "prompt_token_counts": np.array(prompt_token_counts, dtype=object),
         }  # this is a bit hard-coded to bypass the __init__ check in DataProto
         lm_outputs.meta_info = lm_inputs.meta_info
 
@@ -409,8 +414,9 @@ class LLMAgentProxy:
         env_outputs = es_manager.reset()
         ctx_manager.reset_memory_managers()
 
-        max_turn = _resolve_rollout_max_turn(self.config)
-        multi_turn = max_turn > 1
+        truncation_mode = _resolve_rollout_truncation_mode(self.config)
+        max_turn = _resolve_effective_rollout_max_turn(self.config)
+        multi_turn = True if max_turn is None else max_turn > 1
         finalized = False
         last_inputs = None
         total_envs = len(env_outputs)
@@ -435,11 +441,11 @@ class LLMAgentProxy:
 
         try:
             if progress_bar is not None:
-                progress_bar.set_postfix(turn=f"0/{max_turn}", active=active_env_count, refresh=False)
+                turn_budget_label = str(max_turn) if max_turn is not None else "token"
+                progress_bar.set_postfix(turn=f"0/{turn_budget_label}", active=active_env_count, refresh=False)
 
-            for i in range(max_turn):
-                if len(env_outputs) == 0:
-                    break
+            i = 0
+            while len(env_outputs) > 0 and (max_turn is None or i < max_turn):
                 lm_inputs: DataProto = ctx_manager.get_lm_inputs(
                     env_outputs, prepare_for_update=False
                 )
@@ -447,17 +453,23 @@ class LLMAgentProxy:
                     dataproto.meta_info
                 )  # TODO: setup vllm early stop when max length is reached. make sure this can be done
                 last_inputs = lm_inputs
+                is_last_turn = max_turn is not None and i == max_turn - 1
                 if multi_turn:
                     if i == 0:
                         mode = "multiturn-start"
-                    elif i == max_turn - 1:
+                    elif is_last_turn:
                         mode = "multiturn-end"
                     else:
                         mode = "multiturn-middle"
                 else:
                     mode = "singleturn"
                 lm_inputs.meta_info["mode"] = mode
-                self.ctx_wrapper.set_state(turn_idx=i, mode=mode, max_turn=max_turn)
+                self.ctx_wrapper.set_state(
+                    turn_idx=i,
+                    mode=mode,
+                    max_turn=max_turn,
+                    truncation_mode=truncation_mode,
+                )
                 generation_suffix = self._get_generation_suffix()
                 lm_inputs = self.ctx_wrapper.intercept(
                     lm_inputs,
@@ -480,9 +492,10 @@ class LLMAgentProxy:
                         if isinstance(self.actor_wg, ApiCallingWrapperWg)
                         else type(self.actor_wg).__name__
                     )
+                    turn_budget_label = str(max_turn) if max_turn is not None else "token"
                     tqdm.write(
                         f"[Eval] {backend} generation start: "
-                        f"turn={i + 1}/{max_turn}, batch_size={batch_size}, active_envs={len(env_outputs)}"
+                        f"turn={i + 1}/{turn_budget_label}, batch_size={batch_size}, active_envs={len(env_outputs)}"
                     )
                 lm_outputs: DataProto = self.generate_sequences(lm_inputs)
                 self.ctx_wrapper.log_outputs(lm_outputs)
@@ -507,8 +520,9 @@ class LLMAgentProxy:
                     if completed_envs > 0:
                         progress_bar.update(completed_envs)
                     active_env_count = new_active_env_count
+                    turn_budget_label = str(max_turn) if max_turn is not None else "token"
                     progress_bar.set_postfix(
-                        turn=f"{i + 1}/{max_turn}",
+                        turn=f"{i + 1}/{turn_budget_label}",
                         active=active_env_count,
                         refresh=False,
                     )
@@ -519,6 +533,7 @@ class LLMAgentProxy:
                         self.generate_sequences(last_inputs)
                         finalized = True
                     break
+                i += 1
 
             if multi_turn and not finalized and last_inputs is not None:
                 last_inputs.meta_info["skip_generation"] = True
