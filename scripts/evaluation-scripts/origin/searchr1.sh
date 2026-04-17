@@ -53,14 +53,11 @@ if not quiet:
 PY
 }
 
-# Default model is OpenAI GPT-5.2 Instant.
-: "${OPENAI_API_KEY:?Please export OPENAI_API_KEY before running this benchmark.}"
-
 RUN_NAME=${RUN_NAME:-search_r1_api_eval_estimation}
-MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Instant}
+MODEL_NAME=${MODEL_NAME:-Gemini-2.5-Pro}
 VAL_GROUPS=${VAL_GROUPS:-4}
-VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-50}
-VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-0}
+VAL_START_GROUP_INDEX=${VAL_START_GROUP_INDEX:-0}
+VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-16}
 SEARCH_ENV_TAG=${SEARCH_ENV_TAG:-SearchQA}
 SEARCHR1_DATA_ROOT=${SEARCHR1_DATA_ROOT:-/projects/bflz/searchr1_data}
 SEARCH_DATA_DIR=${SEARCH_DATA_DIR:-${SEARCHR1_DATA_ROOT}/data/search}
@@ -76,10 +73,29 @@ MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-50000}
 PROMPT_TOKEN_MARGIN=${PROMPT_TOKEN_MARGIN:-1024}
 TRUNCATION_MODE=${TRUNCATION_MODE:-token}
 NO_BUDGET_PROMPT=${NO_BUDGET_PROMPT:-True}
-MAX_CONTEXT_TOKEN=${MAX_CONTEXT_TOKEN:-2500}
+MAX_CONTEXT_TOKEN=${MAX_CONTEXT_TOKEN:-3500}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/estimation"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/searchr1-origin-gpt5.2-instant-4-test4"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/searchr1-origin-Gemini-2.5-Pro-4-test"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
+
+require_api_key_for_model() {
+  case "$1" in
+    OpenRouter-*|openrouter/*)
+      : "${OPENROUTER_API_KEY:?Please export OPENROUTER_API_KEY before running this benchmark.}"
+      ;;
+    OpenAI-*|gpt-*|o*)
+      : "${OPENAI_API_KEY:?Please export OPENAI_API_KEY before running this benchmark.}"
+      ;;
+    Claude-*|claude-*)
+      : "${ANTHROPIC_API_KEY:?Please export ANTHROPIC_API_KEY before running this benchmark.}"
+      ;;
+    Gemini-*|gemini-*)
+      : "${GEMINI_API_KEY:?Please export GEMINI_API_KEY before running this benchmark.}"
+      ;;
+  esac
+}
+
+require_api_key_for_model "$MODEL_NAME"
 
 DEFAULT_SEARCH_DATA_PATH=$(resolve_path "${SEARCH_DATA_DIR}/train.parquet")
 SEARCH_DATA_PATH=$(resolve_path "$SEARCH_DATA_PATH")

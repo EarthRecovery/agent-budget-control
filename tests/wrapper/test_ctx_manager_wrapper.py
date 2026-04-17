@@ -561,6 +561,60 @@ def test_finalize_rollout_rewrites_messages_to_completed_pairs(tmp_path):
     assert turns[1]["messages"][4]["content"] == "<answer>Down</answer>"
 
 
+def test_finalize_rollout_flattens_context_token_truncation_fields(tmp_path):
+    wrapper = make_dialogue_wrapper(tmp_path, start_group_index=0)
+    env_record = wrapper._ensure_env_record(0, group_id=0, uid=None)
+
+    turn1 = wrapper._ensure_turn_record(env_record, 1)
+    turn1["request_messages"] = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "Turn 1 state"},
+    ]
+    turn1["messages"] = copy.deepcopy(turn1["request_messages"])
+    turn1["user_prompt"] = "Turn 1 state"
+    wrapper._pending_turn_records[(0, 1)] = turn1
+
+    wrapper.finalize_rollout(
+        [
+            {
+                "env_id": 0,
+                "group_id": 0,
+                "uid": None,
+                "tag": "SearchQA",
+                "history": [
+                    {
+                        "state": "S1",
+                        "llm_raw_response": "<think>plan</think><answer>search[q]</answer>",
+                        "llm_response": "<answer>search[q]</answer>",
+                        "actions": [],
+                        "reward": 0.0,
+                        "token_count": 8,
+                        "info": {
+                            "success": False,
+                            "context_token_truncated": True,
+                            "truncation_mode": "token",
+                            "context_token_limit": 10,
+                            "context_tokens_used_before_turn": 7,
+                            "context_tokens_used_this_turn": 13,
+                            "context_tokens_used_after_turn": 20,
+                            "context_token_delta": 3,
+                        },
+                    },
+                ],
+            }
+        ]
+    )
+
+    record = wrapper._estimation_records[0]["turns"][0]
+    assert record["context_token_truncated"] is True
+    assert record["truncation_mode"] == "token"
+    assert record["context_token_limit"] == 10
+    assert record["context_tokens_used_before_turn"] == 7
+    assert record["context_tokens_used_this_turn"] == 13
+    assert record["context_tokens_used_after_turn"] == 20
+    assert record["context_token_delta"] == 3
+
+
 def test_finalize_rollout_skips_blank_assistant_turns_in_completed_pairs(tmp_path):
     wrapper = make_wrapper(tmp_path, start_group_index=0)
     env_record = wrapper._ensure_env_record(0, group_id=0, uid=None)

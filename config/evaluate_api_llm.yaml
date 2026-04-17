@@ -39,7 +39,7 @@ model_info:
     provider_name: openai
     model_name: gpt-5.2
     generation_kwargs:
-      max_completion_tokens: 512
+      max_completion_tokens: 800
       reasoning_effort: none
   OpenAI-5.2-Thinking:
     provider_name: openai
@@ -47,6 +47,48 @@ model_info:
     generation_kwargs:
       max_completion_tokens: 512
       reasoning_effort: high
+  OpenRouter-Qwen3.6-Plus:
+    provider_name: openrouter
+    model_name: qwen/qwen3.6-plus
+    generation_kwargs:
+      temperature: 0
+      max_tokens: 800
+  OpenRouter-Qwen3-32B:
+    provider_name: openrouter
+    model_name: qwen/qwen3-32b
+    generation_kwargs:
+      temperature: 0
+      max_tokens: 800
+  Claude-Opus-4.7-low-thinking:
+    provider_name: anthropic
+    model_name: claude-opus-4-7
+    generation_kwargs:
+      max_tokens: 800
+      # thinking:
+      #   type: disable
+      output_config:
+        effort: low
+  Claude-Sonnet-4.6-low-thinking:
+    provider_name: anthropic
+    model_name: claude-sonnet-4-6
+    generation_kwargs:
+      max_tokens: 800
+      # thinking:
+      #   type: disable
+      output_config:
+        effort: low
+  Gemini-2.5-Pro:
+    provider_name: gemini
+    model_name: gemini-2.5-pro
+    generation_kwargs:
+      temperature: 0
+      max_tokens: 800
+  Gemini-2.5-flash:
+    provider_name: gemini
+    model_name: gemini-2.5-flash
+    generation_kwargs:
+      temperature: 0
+      max_tokens: 800
   deepseek-r1:
     provider_name: deepseek
     model_name: deepseek-reasoner

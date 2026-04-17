@@ -10,7 +10,7 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
 PROVIDER=${PROVIDER:-openai}
-MODEL_NAME=${MODEL_NAME:-gpt-5.2-instant}
+MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Instant}
 REASONING_EFFORT=${REASONING_EFFORT:-}
 
 case "$MODEL_NAME" in
@@ -77,18 +77,17 @@ case "$PROVIDER" in
     ;;
 esac
 
-RUN_NAME=${RUN_NAME:-sokoban-origin-gpt5.2-instant-128-main_gpt5.2-instant-128-token-estimation-1-test}
+RUN_NAME=${RUN_NAME:-searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/${RUN_NAME}"}
-INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"}
 OUTPUT_JSON=${OUTPUT_JSON:-"$OUTPUT_DIR/${RUN_NAME}.json"}
 TEMP_JSON=${TEMP_JSON:-"$OUTPUT_DIR/${RUN_NAME}_pairs.json"}
-SYSTEM_PROMPT_FILE=${SYSTEM_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_system.txt"}
-USER_PROMPT_FILE=${USER_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_user.txt"}
+SYSTEM_PROMPT_FILE=${SYSTEM_PROMPT_FILE:-"$SCRIPT_DIR/prompts/searchr1_estimation_system.txt"}
+USER_PROMPT_FILE=${USER_PROMPT_FILE:-"$SCRIPT_DIR/prompts/searchr1_estimation_user.txt"}
 
-MAX_TURN=${MAX_TURN:-1}
-MAX_CONTEXT_WINDOW_TOKENS=${MAX_CONTEXT_WINDOW_TOKENS:-2500}
-MAX_SAMPLES=${MAX_SAMPLES:-1}
+MAX_TURN=${MAX_TURN:-10}
+MAX_CONTEXT_WINDOW_TOKENS=${MAX_CONTEXT_WINDOW_TOKENS:-3500}
+MAX_SAMPLES=${MAX_SAMPLES:-}
 MAX_CONCURRENCY=${MAX_CONCURRENCY:-8}
 REQUEST_BATCH_SIZE=${REQUEST_BATCH_SIZE:-32}
 MAX_TOKENS=${MAX_TOKENS:-512}
@@ -100,14 +99,15 @@ ANTHROPIC_THINKING_DISPLAY=${ANTHROPIC_THINKING_DISPLAY:-}
 ANTHROPIC_OUTPUT_EFFORT=${ANTHROPIC_OUTPUT_EFFORT:-}
 DRY_RUN=${DRY_RUN:-0}
 
-DEFAULT_RESULT_INPUT_JSON="$PROJECT_ROOT/results/estimation/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
-DEFAULT_BENCHMARK_INPUT_JSON="$PROJECT_ROOT/results/budget-estimation-benchmark/sokoban-origin-gpt5.2-instant-128-window=1-max-turn=6/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
-DEFAULT_DATABASE_INPUT_JSON="/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
-if [[ -z "${INPUT_JSON:-}" ]]; then
+DEFAULT_RESULT_INPUT_JSON="/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
+DEFAULT_TEST_INPUT_JSON="$PROJECT_ROOT/results/estimation/searchr1-origin-gpt5.2-instant-15-test/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
+DEFAULT_DATABASE_INPUT_JSON="/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
+INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"}
+if [[ -z "$INPUT_JSON" ]]; then
   if [[ -f "$DEFAULT_RESULT_INPUT_JSON" ]]; then
     INPUT_JSON="$DEFAULT_RESULT_INPUT_JSON"
-  elif [[ -f "$DEFAULT_BENCHMARK_INPUT_JSON" ]]; then
-    INPUT_JSON="$DEFAULT_BENCHMARK_INPUT_JSON"
+  elif [[ -f "$DEFAULT_TEST_INPUT_JSON" ]]; then
+    INPUT_JSON="$DEFAULT_TEST_INPUT_JSON"
   else
     INPUT_JSON="$DEFAULT_DATABASE_INPUT_JSON"
   fi

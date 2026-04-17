@@ -27,6 +27,10 @@ def _default_api_key_env(provider: str) -> str:
         return "OPENAI_API_KEY"
     if provider == "anthropic":
         return "ANTHROPIC_API_KEY"
+    if provider == "gemini":
+        return "GEMINI_API_KEY"
+    if provider == "openrouter":
+        return "OPENROUTER_API_KEY"
     if provider == "together":
         return "TOGETHER_API_KEY"
     if provider == "deepseek":
@@ -102,7 +106,7 @@ def main() -> None:
     parser.add_argument("--input-json", required=True, help="Path to *_eval_estimation_dialogues.json")
     parser.add_argument("--output-json", required=True, help="Path to aggregated result json")
     parser.add_argument("--temp-json", default=None, help="Path to exported temp input/output pairs json")
-    parser.add_argument("--provider", default="openai", help="LLM provider: openai/anthropic/together/deepseek")
+    parser.add_argument("--provider", default="openai", help="LLM provider: openai/anthropic/gemini/openrouter/together/deepseek")
     parser.add_argument("--model", default="gpt-5.2-2025-12-11", help="Backend model name")
     parser.add_argument("--api-key-env", default=None, help="Environment variable name for API key")
     parser.add_argument("--max-concurrency", type=int, default=8, help="Concurrent requests")
@@ -113,6 +117,11 @@ def main() -> None:
     parser.add_argument("--max-turn", type=int, default=5, help="Legacy rollout turn budget retained for compatibility")
     parser.add_argument("--max-context-window-tokens", type=int, default=81920, help="Total token budget used for can-finish evaluation")
     parser.add_argument("--reasoning-effort", default=None, help="Optional reasoning_effort passed through to compatible models")
+    parser.add_argument("--thinking-enabled", action="store_true", help="Enable Anthropic extended thinking")
+    parser.add_argument("--thinking-budget-tokens", type=int, default=None, help="Anthropic thinking budget_tokens")
+    parser.add_argument("--thinking-adaptive", action="store_true", help="Use Anthropic adaptive thinking")
+    parser.add_argument("--thinking-display", default=None, help="Anthropic adaptive thinking display mode")
+    parser.add_argument("--output-effort", default=None, help="Anthropic output_config.effort")
     parser.add_argument("--system-prompt-file", default=None, help="Optional txt file to override system prompt template")
     parser.add_argument("--user-prompt-file", default=None, help="Optional txt file to override user prompt template")
     parser.add_argument("--disable-source-system", action="store_true", help="Do not include original rollout system in user prompt")
@@ -170,6 +179,24 @@ def main() -> None:
         "max_tokens": int(args.max_tokens),
         "temperature": float(args.temperature),
     }
+    model_name_lower = str(args.model).lower()
+    provider_lower = str(args.provider).lower()
+    if provider_lower == "anthropic" and (
+        model_name_lower.startswith("claude-opus-4") or model_name_lower.startswith("claude-sonnet-4")
+    ):
+        generate_kwargs.pop("temperature", None)
+        if args.thinking_adaptive:
+            thinking_kwargs: Dict[str, Any] = {"type": "adaptive"}
+            if args.thinking_display:
+                thinking_kwargs["display"] = str(args.thinking_display)
+            generate_kwargs["thinking"] = thinking_kwargs
+        elif args.thinking_enabled:
+            thinking_kwargs: Dict[str, Any] = {"type": "enabled"}
+            if args.thinking_budget_tokens is not None:
+                thinking_kwargs["budget_tokens"] = int(args.thinking_budget_tokens)
+            generate_kwargs["thinking"] = thinking_kwargs
+        if args.output_effort:
+            generate_kwargs["output_config"] = {"effort": str(args.output_effort)}
     if args.reasoning_effort:
         generate_kwargs["reasoning_effort"] = str(args.reasoning_effort)
 
@@ -190,12 +217,14 @@ def main() -> None:
                 indexed_samples.append((sample_index, sample))
                 messages_list.append(env.build_api_messages(sample))
 
+            print("[DEBUG] Messages List:", messages_list)
             batch_results, _ = llm.run_batch(
                 messages_list=messages_list,
                 **generate_kwargs,
             )
             for (sample_index, sample), api_result in zip(indexed_samples, batch_results):
                 env.reset(index=sample_index)
+                api_messages = env.build_api_messages(sample)
                 _, _, _, info = env.step(api_result.get("response", ""))
                 results.append(
                     {
@@ -203,8 +232,10 @@ def main() -> None:
                         "rollout_index": sample.rollout_index,
                         "turn_idx": sample.turn_idx,
                         "source_system": sample.source_system,
-                        "input_messages": sample.input_messages,
-                        "input_text": env.build_user_prompt(sample),
+                        "input_messages": api_messages,
+                        "rollout_history_messages": sample.input_messages,
+                        "input_text": json.dumps(api_messages, ensure_ascii=False, indent=2),
+                        "estimation_user_prompt": env.build_user_prompt(sample),
                         "target_output": sample.target_output,
                         "ground_truth": {
                             "actual_tokens_used_so_far": sample.actual_tokens_used_so_far,

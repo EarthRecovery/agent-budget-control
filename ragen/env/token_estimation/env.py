@@ -107,6 +107,48 @@ def _resolve_turn_assistant_content(turn: Dict[str, Any]) -> str:
     return str(turn.get("raw_response") or "").strip()
 
 
+def _is_context_token_truncated_turn(turn: Dict[str, Any]) -> bool:
+    if bool(turn.get("context_token_truncated")):
+        return True
+    info = turn.get("info")
+    return isinstance(info, dict) and bool(info.get("context_token_truncated"))
+
+
+def _turn_has_no_executed_actions(turn: Dict[str, Any]) -> bool:
+    actions = turn.get("actions")
+    if isinstance(actions, list):
+        return len(actions) == 0
+    if actions not in (None, ""):
+        return False
+    action_names = turn.get("action_names")
+    if isinstance(action_names, list):
+        return len(action_names) == 0
+    return False
+
+
+def _is_implicit_context_token_truncated_turn(
+    turn: Dict[str, Any],
+    *,
+    max_context_window_tokens: Optional[int],
+) -> bool:
+    token_limit = _safe_int(max_context_window_tokens)
+    total_tokens = _resolve_turn_total_tokens(turn)
+    if token_limit is None or total_tokens is None:
+        return False
+    if int(total_tokens) <= int(token_limit):
+        return False
+    if bool(turn.get("success")):
+        return False
+    if not _has_turn_assistant_content(turn):
+        return False
+    return _turn_has_no_executed_actions(turn)
+
+
+def _has_direct_api_usage(turn: Dict[str, Any]) -> bool:
+    interactions = turn.get("api_interactions")
+    return isinstance(interactions, list) and len(interactions) > 0
+
+
 def _has_turn_assistant_content(turn: Dict[str, Any]) -> bool:
     return bool(_resolve_turn_assistant_content(turn))
 
@@ -154,11 +196,15 @@ def _usage_details_look_cumulative(
 
 def _normalize_turn_usage_details(
     raw_details: List[Dict[str, Optional[int]]],
+    *,
+    assume_cumulative: Optional[bool] = None,
 ) -> Tuple[List[Dict[str, Optional[int]]], List[Optional[int]], str]:
     if not raw_details:
         return [], [], "delta"
 
-    if not _usage_details_look_cumulative(raw_details):
+    use_cumulative = _usage_details_look_cumulative(raw_details) if assume_cumulative is None else bool(assume_cumulative)
+
+    if not use_cumulative:
         cumulative_totals: List[Optional[int]] = []
         running_total = 0
         for detail in raw_details:
@@ -299,10 +345,20 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
     def _flatten_rollouts(self, rollouts: List[Dict[str, Any]]) -> List[TokenEstimationSample]:
         samples: List[TokenEstimationSample] = []
         for rollout_index, rollout in enumerate(rollouts):
-            raw_turns = sorted(
+            sorted_raw_turns = sorted(
                 list(rollout.get("turns") or []),
                 key=lambda turn: int(turn.get("turn_idx", 0) or 0),
             )
+            if not sorted_raw_turns:
+                continue
+            raw_turns: List[Dict[str, Any]] = []
+            for turn in sorted_raw_turns:
+                if _is_context_token_truncated_turn(turn) or _is_implicit_context_token_truncated_turn(
+                    turn,
+                    max_context_window_tokens=self.config.max_context_window_tokens,
+                ):
+                    break
+                raw_turns.append(turn)
             if not raw_turns:
                 continue
             turns = [turn for turn in raw_turns if _has_turn_assistant_content(turn)]
@@ -313,8 +369,21 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
             raw_per_turn_token_usage_details = [
                 _resolve_turn_token_usage_detail(turn) for turn in turns
             ]
+            # These rollout files store per-request token usage for progressively
+            # longer prefixes:
+            #   turn 1 -> tokens for {turn1}
+            #   turn 2 -> tokens for {turn1, turn2}
+            #   turn 3 -> tokens for {turn1, turn2, turn3}
+            #
+            # Direct API usage therefore does not imply "delta" accounting. Let
+            # the normalizer infer whether the sequence is cumulative from the
+            # observed token pattern instead of forcing delta mode.
+            assume_cumulative = None
             per_turn_token_usage_details, cumulative_turn_totals, _ = (
-                _normalize_turn_usage_details(raw_per_turn_token_usage_details)
+                _normalize_turn_usage_details(
+                    raw_per_turn_token_usage_details,
+                    assume_cumulative=assume_cumulative,
+                )
             )
             per_turn_total_tokens = list(cumulative_turn_totals)
             total_rollout_tokens = (
@@ -414,35 +483,40 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
             blocks.append(f"[{idx}] {role}\n{content}")
         return "\n\n".join(blocks)
 
+    def _build_turn_token_usage_text(self, sample: TokenEstimationSample) -> str:
+        if not sample.completed_turn_token_usage_details:
+            return "None yet."
+        turn_token_usage_parts = []
+        for idx, detail in enumerate(sample.completed_turn_token_usage_details, start=1):
+            input_tokens = detail.get("input_tokens")
+            output_tokens = detail.get("output_tokens")
+            total_tokens = detail.get("total_tokens")
+            input_text = (
+                f"{int(input_tokens)} tokens"
+                if input_tokens is not None
+                else "unknown tokens"
+            )
+            output_text = (
+                f"{int(output_tokens)} tokens"
+                if output_tokens is not None
+                else "unknown tokens"
+            )
+            if total_tokens is None:
+                turn_token_usage_parts.append(
+                    f"Turn {idx}: input {input_text}, output {output_text}"
+                )
+            else:
+                turn_token_usage_parts.append(
+                    f"Turn {idx}: input {input_text}, output {output_text}, total {int(total_tokens)} tokens"
+                )
+        return "; ".join(turn_token_usage_parts)
+
+    def _render_api_messages(self, messages: List[Dict[str, str]]) -> str:
+        return json.dumps(messages, ensure_ascii=False, indent=2)
+
     def build_user_prompt(self, sample: TokenEstimationSample) -> str:
         source_system = sample.source_system if self.config.include_source_system else ""
-        if sample.completed_turn_token_usage_details:
-            turn_token_usage_parts = []
-            for idx, detail in enumerate(sample.completed_turn_token_usage_details, start=1):
-                input_tokens = detail.get("input_tokens")
-                output_tokens = detail.get("output_tokens")
-                total_tokens = detail.get("total_tokens")
-                input_text = (
-                    f"{int(input_tokens)} tokens"
-                    if input_tokens is not None
-                    else "unknown tokens"
-                )
-                output_text = (
-                    f"{int(output_tokens)} tokens"
-                    if output_tokens is not None
-                    else "unknown tokens"
-                )
-                if total_tokens is None:
-                    turn_token_usage_parts.append(
-                        f"Turn {idx}: input {input_text}, output {output_text}"
-                    )
-                else:
-                    turn_token_usage_parts.append(
-                        f"Turn {idx}: input {input_text}, output {output_text}, total {int(total_tokens)} tokens"
-                    )
-            turn_token_usage_text = "; ".join(turn_token_usage_parts)
-        else:
-            turn_token_usage_text = "None yet."
+        turn_token_usage_text = self._build_turn_token_usage_text(sample)
         history_json = json.dumps(sample.input_messages, ensure_ascii=False, indent=2)
         return self.config.user_prompt_template.format(
             source_system=source_system,
@@ -468,10 +542,16 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
         sample = sample or self.current_sample
         if sample is None:
             raise ValueError("No active token estimation sample. Call reset() first or pass a sample.")
-        return [
-            {"role": "system", "content": self.build_system_prompt()},
-            {"role": "user", "content": self.build_user_prompt(sample)},
-        ]
+        messages: List[Dict[str, str]] = []
+        source_system = sample.source_system.strip() if self.config.include_source_system else ""
+        fallback_system = self.build_system_prompt()
+        if source_system:
+            messages.append({"role": "system", "content": source_system})
+        elif fallback_system:
+            messages.append({"role": "system", "content": fallback_system})
+        messages.extend(_normalize_message(message) for message in sample.input_messages)
+        messages.append({"role": "user", "content": self.build_user_prompt(sample)})
+        return messages
 
     def get_sample(self, index: int) -> TokenEstimationSample:
         return self.samples[int(index)]
@@ -480,13 +560,16 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         payload = []
         for sample in self.samples:
+            api_messages = self.build_api_messages(sample)
             payload.append(
                 {
                     "sample_id": sample.sample_id,
                     "rollout_index": sample.rollout_index,
                     "turn_idx": sample.turn_idx,
-                    "input_messages": sample.input_messages,
-                    "input_text": self.build_user_prompt(sample),
+                    "input_messages": api_messages,
+                    "rollout_history_messages": sample.input_messages,
+                    "input_text": self._render_api_messages(api_messages),
+                    "estimation_user_prompt": self.build_user_prompt(sample),
                     "output": sample.target_output,
                     "source_system": sample.source_system,
                     "completed_turns": sample.completed_turns,
@@ -517,7 +600,7 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
         self.current_index = int(index)
         self.current_sample = self.samples[self.current_index]
         self.last_result = None
-        self.render_cache = self.build_user_prompt(self.current_sample)
+        self.render_cache = self._render_api_messages(self.build_api_messages(self.current_sample))
         return self.render_cache
 
     def parse_prediction(self, action: str) -> Dict[str, Any]:

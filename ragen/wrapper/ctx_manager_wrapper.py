@@ -599,6 +599,17 @@ class CtxManagerWrapper:
                         else "goal_predicate_ratio_carry_forward"
                     )
                 turn_record["success"] = bool(turn_info.get("success", False))
+                for info_key in (
+                    "context_token_truncated",
+                    "truncation_mode",
+                    "context_token_limit",
+                    "context_tokens_used_before_turn",
+                    "context_tokens_used_this_turn",
+                    "context_tokens_used_after_turn",
+                    "context_token_delta",
+                ):
+                    if info_key in turn_info:
+                        turn_record[info_key] = turn_info.get(info_key)
                 rollout_success = rollout_success or bool(turn_record["success"])
                 turn_record["actual_token"] = actual_token
                 if last_goal_predicates_satisfied is not None:

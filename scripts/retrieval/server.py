@@ -13,10 +13,13 @@ Usage:
 
 import argparse
 import json
+import mmap
 import os
 import threading
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 import torch
 import faiss
@@ -29,6 +32,142 @@ DEFAULT_SEARCHR1_DATA_ROOT = os.environ.get(
     "/projects/bflz/searchr1_data",
 )
 DEFAULT_INDEX_DIR = os.path.join(DEFAULT_SEARCHR1_DATA_ROOT, "search_data", "prebuilt_indices")
+
+
+class LazyJsonStringArray:
+    """Memory-efficient random access over a JSON array of strings."""
+
+    OFFSETS_SUFFIX = ".offsets.u64"
+    _BUFFER_SIZE = 1_000_000
+    _WHITESPACE = {9, 10, 13, 32}
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        self.offsets_path = self.path.with_name(self.path.name + self.OFFSETS_SUFFIX)
+        self._ensure_offsets()
+
+        self._file = self.path.open("rb")
+        self._mmap = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
+        self._offsets = np.memmap(self.offsets_path, dtype=np.uint64, mode="r")
+        if self._offsets.size == 0:
+            raise ValueError(f"Offset index is empty: {self.offsets_path}")
+
+    def __len__(self) -> int:
+        return max(0, int(self._offsets.size) - 1)
+
+    def __getitem__(self, idx: int) -> str:
+        idx = int(idx)
+        size = len(self)
+        if idx < 0:
+            idx += size
+        if idx < 0 or idx >= size:
+            raise IndexError(idx)
+
+        start = int(self._offsets[idx])
+        end = int(self._offsets[idx + 1])
+        while end > start and self._mmap[end - 1] in self._WHITESPACE.union({44}):
+            end -= 1
+        return json.loads(self._mmap[start:end])
+
+    def close(self) -> None:
+        self._offsets._mmap.close()
+        self._mmap.close()
+        self._file.close()
+
+    def _ensure_offsets(self) -> None:
+        if self._offsets_are_fresh():
+            return
+        self._build_offsets()
+
+    def _offsets_are_fresh(self) -> bool:
+        if not self.offsets_path.exists():
+            return False
+        if self.offsets_path.stat().st_size % np.dtype(np.uint64).itemsize != 0:
+            return False
+        return self.offsets_path.stat().st_mtime >= self.path.stat().st_mtime
+
+    def _build_offsets(self) -> None:
+        tmp_path = self.offsets_path.with_suffix(self.offsets_path.suffix + ".tmp")
+        print(f"Building lazy corpus offsets at {self.offsets_path} ...")
+
+        with self.path.open("rb") as f, tmp_path.open("wb") as out:
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            try:
+                pos = self._skip_whitespace(mm, 0)
+                if pos >= len(mm) or mm[pos] != ord("["):
+                    raise ValueError(f"{self.path} is not a JSON array")
+                pos += 1
+
+                buffer = []
+                item_count = 0
+                while True:
+                    pos = self._skip_whitespace(mm, pos)
+                    if pos >= len(mm):
+                        raise ValueError(f"Unexpected EOF while parsing {self.path}")
+                    if mm[pos] == ord("]"):
+                        buffer.append(pos)
+                        self._flush_offsets(buffer, out)
+                        break
+
+                    buffer.append(pos)
+                    item_count += 1
+                    pos = self._scan_json_string(mm, pos)
+                    pos = self._skip_whitespace(mm, pos)
+                    if pos >= len(mm):
+                        raise ValueError(f"Unexpected EOF after item {item_count} in {self.path}")
+
+                    if mm[pos] == ord(","):
+                        pos += 1
+                    elif mm[pos] == ord("]"):
+                        buffer.append(pos)
+                        self._flush_offsets(buffer, out)
+                        break
+                    else:
+                        raise ValueError(f"Unexpected byte {mm[pos]!r} at position {pos} in {self.path}")
+
+                    if len(buffer) >= self._BUFFER_SIZE:
+                        self._flush_offsets(buffer, out)
+            finally:
+                mm.close()
+
+        tmp_path.replace(self.offsets_path)
+        offsets_count = self.offsets_path.stat().st_size // np.dtype(np.uint64).itemsize
+        print(f"Built lazy corpus offsets for {max(0, offsets_count - 1)} documents")
+
+    @staticmethod
+    def _flush_offsets(buffer: list[int], fh) -> None:
+        if not buffer:
+            return
+        np.asarray(buffer, dtype=np.uint64).tofile(fh)
+        buffer.clear()
+
+    @classmethod
+    def _skip_whitespace(cls, mm: mmap.mmap, pos: int) -> int:
+        size = len(mm)
+        while pos < size and mm[pos] in cls._WHITESPACE:
+            pos += 1
+        return pos
+
+    @staticmethod
+    def _scan_json_string(mm: mmap.mmap, pos: int) -> int:
+        if mm[pos] != ord('"'):
+            raise ValueError(f"Expected JSON string at position {pos}")
+
+        pos += 1
+        while True:
+            quote_pos = mm.find(b'"', pos)
+            if quote_pos == -1:
+                raise ValueError("Unterminated JSON string")
+
+            backslash_count = 0
+            scan_pos = quote_pos - 1
+            while scan_pos >= 0 and mm[scan_pos] == ord("\\"):
+                backslash_count += 1
+                scan_pos -= 1
+
+            if backslash_count % 2 == 0:
+                return quote_pos + 1
+            pos = quote_pos + 1
 
 
 class LocalRetriever:
@@ -58,13 +197,18 @@ class LocalRetriever:
 
         # Load corpus
         corpus_file = self.data_dir / "corpus.json"
-        with open(corpus_file) as f:
-            self.corpus = json.load(f)
+        self.corpus = LazyJsonStringArray(corpus_file)
         print(f"Loaded corpus with {len(self.corpus)} documents")
 
         # Load dense index
         dense_index_file = self.data_dir / "e5_Flat.index"
-        self.dense_index = faiss.read_index(str(dense_index_file))
+        mmap_flags = getattr(faiss, "IO_FLAG_MMAP", 0) | getattr(faiss, "IO_FLAG_READ_ONLY", 0)
+        try:
+            self.dense_index = faiss.read_index(str(dense_index_file), mmap_flags)
+            print("Loaded dense index with FAISS mmap/read-only flags")
+        except Exception as exc:
+            print(f"FAISS mmap load unavailable ({exc}); falling back to standard read_index")
+            self.dense_index = faiss.read_index(str(dense_index_file))
         print(f"Loaded dense index with {self.dense_index.ntotal} vectors")
 
     def search(self, query: str, k: int = 10) -> list[dict[str, Any]]:

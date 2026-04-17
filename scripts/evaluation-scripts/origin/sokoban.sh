@@ -8,12 +8,9 @@ PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/agent-budget-control"}
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
-# Default model is OpenAI GPT-4o.
-: "${OPENAI_API_KEY:?Please export OPENAI_API_KEY before running this benchmark.}"
-
 RUN_NAME=${RUN_NAME:-sokoban_api_eval_estimation}
-MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Instant}
-VAL_GROUPS=${VAL_GROUPS:-128}
+MODEL_NAME=${MODEL_NAME:-Gemini-2.5-Pro}
+VAL_GROUPS=${VAL_GROUPS:-4}
 VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-32}
 MAX_TURN=${MAX_TURN:-10}
 MAX_ACTIONS_PER_TURN=${MAX_ACTIONS_PER_TURN:-3}
@@ -33,9 +30,28 @@ API_REQUEST_TIMEOUT_SECONDS=${API_REQUEST_TIMEOUT_SECONDS:-180}
 TRUNCATION_MODE=${TRUNCATION_MODE:-token}
 NO_BUDGET_PROMPT=${NO_BUDGET_PROMPT:-True}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/estimation"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/sokoban-origin-gpt5.2-instant-128-main-new"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/sokoban-origin-gemini-2.5-pro-4-test"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 MAX_CONTEXT_TOKEN=${MAX_CONTEXT_TOKEN:-2500}
+
+require_api_key_for_model() {
+  case "$1" in
+    OpenRouter-*|openrouter/*)
+      : "${OPENROUTER_API_KEY:?Please export OPENROUTER_API_KEY before running this benchmark.}"
+      ;;
+    OpenAI-*|gpt-*|o*)
+      : "${OPENAI_API_KEY:?Please export OPENAI_API_KEY before running this benchmark.}"
+      ;;
+    Claude-*|claude-*)
+      : "${ANTHROPIC_API_KEY:?Please export ANTHROPIC_API_KEY before running this benchmark.}"
+      ;;
+    Gemini-*|gemini-*)
+      : "${GEMINI_API_KEY:?Please export GEMINI_API_KEY before running this benchmark.}"
+      ;;
+  esac
+}
+
+require_api_key_for_model "$MODEL_NAME"
 
 mkdir -p "$OUTPUT_DIR" "$HYDRA_DIR"
 

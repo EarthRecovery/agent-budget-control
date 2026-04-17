@@ -1,4 +1,29 @@
 Agent Budget Estimation - Storyline
+基于当前已有图的判断
+整体区分基本合理，但对当前这组图来说，层次略多。现有图最强支撑的是一条更集中的经验主线：这是一个 trajectory-level 的在线估计问题，并且当前模型呈现出三类非常清晰的现象：fail 判断会随轨迹推进而改善、success rollout 上区间会逐步变窄、整体误差类型偏过于乐观。相比之下，baseline taxonomy、oracle 上界、controlled intervention 这些段落目前没有对应图，保留为文字可以，但不适合作为主线的视觉支撑中心。
+
+建议的主线拆分与配图
+1. 这是一个在线而非事后统计的问题：budget 使用会沿 trajectory 动态变化，因此必须看过程而不是只看最终总成本。
+配图：Figure 7（average token used in each rollout turn）。
+
+2. 只看 first-turn estimation 不够，真正重要的是整条轨迹上 estimation 如何随相对位置变化。
+配图：Figure 2（estimation accuracy in all turns）。
+补充图：Figure 1 可作为 first-turn snapshot 放在旁边或 appendix。
+
+3. 在 fail 相关判断上，模型并不是一开始就知道自己会失败，而是到后期判断准确率才明显升高。
+配图：Figure 2（重点看 failure rollout 曲线）。
+
+4. 在 success rollout 上，随着轨迹推进、信息增多，预测区间整体逐步收窄，说明模型有一定在线校准能力。
+配图：Figure 5（range width change in success rollouts）。
+
+5. 当前模型最突出的系统性偏差不是“瞎猜”，而是“过于乐观”：更常低估所需 budget，而不是高估。
+配图：Figure 4（hit rate and miss direction in success rollouts）。
+
+6. 以上几个现象共同体现在 reward 上：成功与失败轨迹的 reward 结构明显不同，而且 reward 的变化不是均匀的。
+配图：Figure 3（reward curve）。
+
+7. Figure 6 更适合放在 implementation / systems observation 中，而不是主发现里。它解释的是 rollout 和 estimation 的 cache 复用差异，对核心 scientific claim 是补充，不是主证据。
+
 今天的 Agent 已经会规划、会调用工具、会执行复杂任务，但真实部署从来不是在无限 budget 下进行的。一个真正可部署的 Agent，不仅要会做事，还必须知道自己还要花多少资源，以及自己对这个判断有多确定。
 这正是我们要研究的问题：Agent Budget Estimation。
 为什么这个问题重要

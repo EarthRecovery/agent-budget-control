@@ -203,6 +203,126 @@ class OpenAIProvider(LLMProvider):
             request_id=getattr(response, "id", None),
         )
 
+class OpenRouterProvider(LLMProvider):
+    """OpenRouter via the OpenAI-compatible endpoint."""
+    provider_name = "openrouter"
+
+    def __init__(
+        self,
+        model_name: str = "qwen/qwen3.6-plus",
+        api_key: Optional[str] = None,
+        timeout: Optional[Union[float, httpx.Timeout]] = None,
+    ):
+        self.model_name = model_name
+        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
+        if not self.api_key:
+            raise ValueError("OpenRouter API key not provided and not found in environment variables")
+
+        default_headers = {}
+        referer = os.environ.get("OPENROUTER_HTTP_REFERER")
+        title = os.environ.get("OPENROUTER_X_TITLE")
+        if referer:
+            default_headers["HTTP-Referer"] = referer
+        if title:
+            default_headers["X-Title"] = title
+
+        self._client_kwargs = {
+            "api_key": self.api_key,
+            "base_url": "https://openrouter.ai/api/v1",
+            "max_retries": 0,
+        }
+        if default_headers:
+            self._client_kwargs["default_headers"] = default_headers
+        if timeout is not None:
+            self._client_kwargs["timeout"] = timeout
+        self.client = None
+        self._client_loop_id = None
+
+    def _get_client(self) -> AsyncOpenAI:
+        loop_id = id(asyncio.get_running_loop())
+        if self.client is None or self._client_loop_id != loop_id:
+            self.client = AsyncOpenAI(**self._client_kwargs)
+            self._client_loop_id = loop_id
+        return self.client
+
+    async def close(self) -> None:
+        if self.client is None:
+            return
+        await _maybe_aclose_client(self.client)
+        self.client = None
+        self._client_loop_id = None
+
+    async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+        response = await self._get_client().chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            **kwargs
+        )
+        if response.choices[0].finish_reason in ['length', 'content_filter']:
+            raise ValueError("Content filtered or length exceeded")
+        return LLMResponse(
+            content=response.choices[0].message.content,
+            model_name=response.model,
+            provider_name=self.provider_name,
+            usage=_normalize_usage(getattr(response, "usage", None)),
+            request_id=getattr(response, "id", None),
+        )
+
+class GeminiProvider(LLMProvider):
+    """Gemini API provider via Google's OpenAI-compatible endpoint."""
+    provider_name = "gemini"
+
+    def __init__(
+        self,
+        model_name: str = "gemini-2.5-pro",
+        api_key: Optional[str] = None,
+        timeout: Optional[Union[float, httpx.Timeout]] = None,
+    ):
+        self.model_name = model_name
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        if not self.api_key:
+            raise ValueError("Gemini API key not provided and not found in environment variables")
+
+        self._client_kwargs = {
+            "api_key": self.api_key,
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "max_retries": 0,
+        }
+        if timeout is not None:
+            self._client_kwargs["timeout"] = timeout
+        self.client = None
+        self._client_loop_id = None
+
+    def _get_client(self) -> AsyncOpenAI:
+        loop_id = id(asyncio.get_running_loop())
+        if self.client is None or self._client_loop_id != loop_id:
+            self.client = AsyncOpenAI(**self._client_kwargs)
+            self._client_loop_id = loop_id
+        return self.client
+
+    async def close(self) -> None:
+        if self.client is None:
+            return
+        await _maybe_aclose_client(self.client)
+        self.client = None
+        self._client_loop_id = None
+
+    async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+        response = await self._get_client().chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            **kwargs
+        )
+        if response.choices[0].finish_reason in ['length', 'content_filter']:
+            raise ValueError("Content filtered or length exceeded")
+        return LLMResponse(
+            content=response.choices[0].message.content,
+            model_name=response.model,
+            provider_name=self.provider_name,
+            usage=_normalize_usage(getattr(response, "usage", None)),
+            request_id=getattr(response, "id", None),
+        )
+
 class DeepSeekProvider(LLMProvider):
     """DeepSeek API provider implementation"""
     provider_name = "deepseek"
@@ -286,6 +406,42 @@ class AnthropicProvider(LLMProvider):
             self._client_loop_id = loop_id
         return self.client
 
+    def _normalize_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(kwargs)
+        # New Claude 4.x models reject/deprecate the temperature parameter.
+        if self.model_name.startswith("claude-opus-4") or self.model_name.startswith("claude-sonnet-4"):
+            normalized.pop("temperature", None)
+        thinking = normalized.get("thinking")
+        if thinking is not None:
+            if not isinstance(thinking, dict):
+                raise ValueError("Anthropic thinking must be a dict")
+            thinking_type = str(thinking.get("type", "enabled"))
+            normalized_thinking = {"type": thinking_type}
+            if thinking_type == "enabled":
+                budget_tokens = thinking.get("budget_tokens")
+                if budget_tokens is not None:
+                    normalized_thinking["budget_tokens"] = int(budget_tokens)
+            elif thinking_type == "adaptive":
+                display = thinking.get("display")
+                if display is not None:
+                    normalized_thinking["display"] = str(display)
+            else:
+                raise ValueError(f"Unsupported Anthropic thinking type: {thinking_type}")
+            normalized["thinking"] = normalized_thinking
+        output_config = normalized.get("output_config")
+        if output_config is not None:
+            if not isinstance(output_config, dict):
+                raise ValueError("Anthropic output_config must be a dict")
+            normalized_output_config = {}
+            effort = output_config.get("effort")
+            if effort is not None:
+                normalized_output_config["effort"] = str(effort)
+            output_format = output_config.get("format")
+            if output_format is not None:
+                normalized_output_config["format"] = output_format
+            normalized["output_config"] = normalized_output_config
+        return normalized
+
     async def close(self) -> None:
         if self.client is None:
             return
@@ -294,6 +450,7 @@ class AnthropicProvider(LLMProvider):
         self._client_loop_id = None
     
     async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+        kwargs = self._normalize_kwargs(kwargs)
         # Extract system message if present
         system_content = ""
         chat_messages = []
@@ -386,6 +543,14 @@ class ConcurrentLLM:
         else:
             if provider.lower() == "openai":
                 self.provider = OpenAIProvider(model_name or "gpt-4o", api_key, timeout=timeout)
+            elif provider.lower() == "openrouter":
+                self.provider = OpenRouterProvider(
+                    model_name or "qwen/qwen3.6-plus", api_key, timeout=timeout
+                )
+            elif provider.lower() == "gemini":
+                self.provider = GeminiProvider(
+                    model_name or "gemini-2.5-pro", api_key, timeout=timeout
+                )
             elif provider.lower() == "deepseek":
                 self.provider = DeepSeekProvider(
                     model_name or "deepseek-reasoner", api_key, timeout=timeout

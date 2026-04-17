@@ -8,21 +8,16 @@ DEFAULT_SYSTEM_PROMPT_TEMPLATE = """You are an evaluation agent. Based on the pr
 
 
 DEFAULT_USER_PROMPT_TEMPLATE = """
-[Original system]
-{source_system}
-
-[Completed history]
-{history_json}
-
-Based on the provided rollout context:
+Based on the provided rollout context, you are provided below information:
 1. You have completed {completed_turns} turns.
-2. Each completed turn used: {turn_token_usage_text}
-3. You must finish the full interaction within {max_context_window_tokens} total tokens (input + output).
+2. Each turn, your token consumption is {turn_token_usage_text}.
+3. You need to finish the task within {max_context_window_tokens} tokens.
 
-Estimate:
-1. Whether the rollout can finish successfully within the total token budget.
-2. If yes, how many additional tokens (input + output) are still needed starting from the next turn. Return a tight interval [est_low, est_high].
+Now, estimate:
+1. Whether you can finish the task successfully within {max_context_window_tokens} total tokens (input + output).
+2. If yes, how many additional tokens (input + output) are still needed to finish the task, starting from the next turn. Return an estimation interval: at least est_low tokens and at most est_high tokens.
 3. If no, answer "impossible".
+4. You should try your best to estimate whether the task can finish within budget (most important). If you think the task can finish within budget, your interval should be as tight as possible while still covering the true remaining token budget.
 
 Example:
 For a three-turn interaction, suppose only Turn 1 has been completed.
