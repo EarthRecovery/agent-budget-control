@@ -21,6 +21,6 @@ You should estimate:
 X2 + Y2 + X3 + Y3
 
 Output exactly one of the following:
-<think>[YOUR THINKING]</think><answer>[est_low, est_high]</answer>
+<think> [Your thoughts, typically 2 sentences,less than 100 tokens] </think><answer>[est_low, est_high]</answer>
 or
-<think>[YOUR THINKING]</think><answer>impossible</answer>
+<think> [Your thoughts, typically 2 sentences,less than 100 tokens] </think><answer>impossible</answer>

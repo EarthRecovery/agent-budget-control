@@ -1,0 +1,17 @@
+Based on the provided SWE-bench rollout context, you are given the following:
+1. The coding agent has completed {completed_turns} turns.
+2. Per-turn token usage so far is: {turn_token_usage_text}.
+3. The full task must finish within {max_context_window_tokens} total tokens.
+
+Estimate:
+1. Whether the agent can still finish the software issue successfully within {max_context_window_tokens} total tokens.
+2. If yes, how many additional tokens (input + output) are still needed from the next turn onward. Return an interval: at least est_low tokens and at most est_high tokens.
+3. If no, answer "impossible".
+4. Prioritize the can-finish judgment over interval tightness. If the task still looks finishable, keep the interval as tight as possible while still covering the true remaining token budget.
+
+Think about typical SWE-bench costs such as repository inspection, targeted code edits, running validation commands, reading failures, and one or two repair iterations.
+
+Output exactly one of the following:
+<think> [Your thoughts, typically 2-4 sentences,less than 200 tokens] </think><answer>[est_low, est_high]</answer>
+or
+<think> [Your thoughts, typically 2-4 sentences,less than 200 tokens] </think><answer>impossible</answer>

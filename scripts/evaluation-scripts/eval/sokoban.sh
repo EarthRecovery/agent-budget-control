@@ -9,9 +9,11 @@ PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/agent-budget-control"}
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
-PROVIDER=${PROVIDER:-openai}
-MODEL_NAME=${MODEL_NAME:-gpt-5.2-instant}
+PROVIDER=${PROVIDER:-anthropic}
+MODEL_NAME=${MODEL_NAME:-OpenRouter-Gemini-3.1-Pro-Preview}
 REASONING_EFFORT=${REASONING_EFFORT:-}
+OPENROUTER_REASONING_ENABLED=${OPENROUTER_REASONING_ENABLED:-}
+OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-}
 
 case "$MODEL_NAME" in
   OpenAI-5.2-Instant)
@@ -50,6 +52,30 @@ case "$MODEL_NAME" in
     PROVIDER=openrouter
     MODEL_NAME=qwen/qwen3.6-plus
     ;;
+  OpenRouter-Gemini-3.1-Pro-Preview)
+    PROVIDER=openrouter
+    MODEL_NAME=google/gemini-3.1-pro-preview
+    REASONING_EFFORT=${REASONING_EFFORT:-low}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    ;;
+  qwen/qwen3-235b-a22b-2507)
+    PROVIDER=openrouter
+    MODEL_NAME=qwen/qwen3-235b-a22b-2507
+    REASONING_EFFORT=${REASONING_EFFORT:-low}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    ;;
+  OpenRouter-DeepSeek-V3.2|deepseek/deepseek-v3.2)
+    PROVIDER=openrouter
+    MODEL_NAME=deepseek/deepseek-v3.2
+    OPENROUTER_REASONING_ENABLED=${OPENROUTER_REASONING_ENABLED:-0}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    ;;
+  OpenRouter-MiniMax-M2.5|minimax/minimax-m2.5)
+    PROVIDER=openrouter
+    MODEL_NAME=minimax/minimax-m2.5
+    OPENROUTER_REASONING_ENABLED=${OPENROUTER_REASONING_ENABLED:-0}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    ;;
 esac
 
 case "$PROVIDER" in
@@ -77,10 +103,10 @@ case "$PROVIDER" in
     ;;
 esac
 
-RUN_NAME=${RUN_NAME:-sokoban-origin-gpt5.2-instant-128-main_gpt5.2-instant-128-token-estimation-1-test}
+RUN_NAME=${RUN_NAME:-sokoban-origin-gemini-3.1-pro-preview-128-main_gemini-3.1-pro-preview-token-estimation-main}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/${RUN_NAME}"}
-INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"}
+INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/sokoban-origin-gemini-3.1-pro-preview-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"}
 OUTPUT_JSON=${OUTPUT_JSON:-"$OUTPUT_DIR/${RUN_NAME}.json"}
 TEMP_JSON=${TEMP_JSON:-"$OUTPUT_DIR/${RUN_NAME}_pairs.json"}
 SYSTEM_PROMPT_FILE=${SYSTEM_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_system.txt"}
@@ -88,7 +114,7 @@ USER_PROMPT_FILE=${USER_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_use
 
 MAX_TURN=${MAX_TURN:-1}
 MAX_CONTEXT_WINDOW_TOKENS=${MAX_CONTEXT_WINDOW_TOKENS:-2500}
-MAX_SAMPLES=${MAX_SAMPLES:-1}
+MAX_SAMPLES=${MAX_SAMPLES:-}
 MAX_CONCURRENCY=${MAX_CONCURRENCY:-8}
 REQUEST_BATCH_SIZE=${REQUEST_BATCH_SIZE:-32}
 MAX_TOKENS=${MAX_TOKENS:-512}
@@ -150,6 +176,16 @@ CMD=(
 if [[ -n "$REASONING_EFFORT" ]]; then
   CMD+=(--reasoning-effort "$REASONING_EFFORT")
 fi
+
+if [[ -n "$OPENROUTER_REASONING_ENABLED" ]]; then
+  CMD+=(--reasoning-enabled "$OPENROUTER_REASONING_ENABLED")
+fi
+
+case "${OPENROUTER_CACHE_ENABLED,,}" in
+  1|true|yes|on)
+    CMD+=(--cache-enabled)
+    ;;
+esac
 
 if [[ "$ANTHROPIC_THINKING_ENABLED" == "1" ]]; then
   CMD+=(--thinking-enabled)

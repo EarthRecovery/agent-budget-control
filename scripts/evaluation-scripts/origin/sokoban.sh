@@ -9,8 +9,8 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
 RUN_NAME=${RUN_NAME:-sokoban_api_eval_estimation}
-MODEL_NAME=${MODEL_NAME:-Gemini-2.5-Pro}
-VAL_GROUPS=${VAL_GROUPS:-4}
+MODEL_NAME=${MODEL_NAME:-OpenRouter-Gemini-3.1-Pro-Preview}
+VAL_GROUPS=${VAL_GROUPS:-128}
 VAL_ROLLOUT_CHUNK_SIZE=${VAL_ROLLOUT_CHUNK_SIZE:-32}
 MAX_TURN=${MAX_TURN:-10}
 MAX_ACTIONS_PER_TURN=${MAX_ACTIONS_PER_TURN:-3}
@@ -30,13 +30,13 @@ API_REQUEST_TIMEOUT_SECONDS=${API_REQUEST_TIMEOUT_SECONDS:-180}
 TRUNCATION_MODE=${TRUNCATION_MODE:-token}
 NO_BUDGET_PROMPT=${NO_BUDGET_PROMPT:-True}
 RESULT_ROOT=${RESULT_ROOT:-"$PWD/results/estimation"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/sokoban-origin-gemini-2.5-pro-4-test"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/sokoban-origin-gemini-3.1-pro-preview-128-main"}
 HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 MAX_CONTEXT_TOKEN=${MAX_CONTEXT_TOKEN:-2500}
 
 require_api_key_for_model() {
   case "$1" in
-    OpenRouter-*|openrouter/*)
+    OpenRouter-*|openrouter/*|deepseek/deepseek-v3.2|minimax/minimax-m2.5)
       : "${OPENROUTER_API_KEY:?Please export OPENROUTER_API_KEY before running this benchmark.}"
       ;;
     OpenAI-*|gpt-*|o*)

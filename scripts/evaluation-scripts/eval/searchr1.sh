@@ -9,9 +9,11 @@ PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/agent-budget-control"}
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
-PROVIDER=${PROVIDER:-openai}
-MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Instant}
+PROVIDER=${PROVIDER:-anthropic}
+MODEL_NAME=${MODEL_NAME:-Claude-Opus-4.7-low-thinking}
 REASONING_EFFORT=${REASONING_EFFORT:-}
+OPENROUTER_REASONING_ENABLED=${OPENROUTER_REASONING_ENABLED:-}
+OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-}
 
 case "$MODEL_NAME" in
   OpenAI-5.2-Instant)
@@ -50,6 +52,30 @@ case "$MODEL_NAME" in
     PROVIDER=openrouter
     MODEL_NAME=qwen/qwen3.6-plus
     ;;
+  OpenRouter-Gemini-2.5-Pro|google/gemini-2.5-pro)
+    PROVIDER=openrouter
+    MODEL_NAME=google/gemini-2.5-pro
+    REASONING_EFFORT=${REASONING_EFFORT:-low}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    ;;
+  qwen/qwen3-235b-a22b-2507)
+    PROVIDER=openrouter
+    MODEL_NAME=qwen/qwen3-235b-a22b-2507
+    REASONING_EFFORT=${REASONING_EFFORT:-low}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    ;;
+  OpenRouter-DeepSeek-V3.2|deepseek/deepseek-v3.2)
+    PROVIDER=openrouter
+    MODEL_NAME=deepseek/deepseek-v3.2
+    OPENROUTER_REASONING_ENABLED=${OPENROUTER_REASONING_ENABLED:-0}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    ;;
+  OpenRouter-MiniMax-M2.5|minimax/minimax-m2.5)
+    PROVIDER=openrouter
+    MODEL_NAME=minimax/minimax-m2.5
+    OPENROUTER_REASONING_ENABLED=${OPENROUTER_REASONING_ENABLED:-0}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    ;;
 esac
 
 case "$PROVIDER" in
@@ -77,7 +103,7 @@ case "$PROVIDER" in
     ;;
 esac
 
-RUN_NAME=${RUN_NAME:-searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main}
+RUN_NAME=${RUN_NAME:-searchr1-origin-Claude-Opus-4.7-low-thinking-128-main_Claude-Opus-4.7-low-thinking-128-token-estimation-main}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/${RUN_NAME}"}
 OUTPUT_JSON=${OUTPUT_JSON:-"$OUTPUT_DIR/${RUN_NAME}.json"}
@@ -102,7 +128,7 @@ DRY_RUN=${DRY_RUN:-0}
 DEFAULT_RESULT_INPUT_JSON="/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
 DEFAULT_TEST_INPUT_JSON="$PROJECT_ROOT/results/estimation/searchr1-origin-gpt5.2-instant-15-test/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
 DEFAULT_DATABASE_INPUT_JSON="/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
-INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"}
+INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/searchr1-origin-Claude-Opus-4.7-low-thinking-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"}
 if [[ -z "$INPUT_JSON" ]]; then
   if [[ -f "$DEFAULT_RESULT_INPUT_JSON" ]]; then
     INPUT_JSON="$DEFAULT_RESULT_INPUT_JSON"
@@ -150,6 +176,16 @@ CMD=(
 if [[ -n "$REASONING_EFFORT" ]]; then
   CMD+=(--reasoning-effort "$REASONING_EFFORT")
 fi
+
+if [[ -n "$OPENROUTER_REASONING_ENABLED" ]]; then
+  CMD+=(--reasoning-enabled "$OPENROUTER_REASONING_ENABLED")
+fi
+
+case "${OPENROUTER_CACHE_ENABLED,,}" in
+  1|true|yes|on)
+    CMD+=(--cache-enabled)
+    ;;
+esac
 
 if [[ "$ANTHROPIC_THINKING_ENABLED" == "1" ]]; then
   CMD+=(--thinking-enabled)

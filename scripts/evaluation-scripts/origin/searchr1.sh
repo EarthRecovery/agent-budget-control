@@ -80,7 +80,7 @@ HYDRA_DIR=${HYDRA_DIR:-"$OUTPUT_DIR/hydra/$RUN_NAME"}
 
 require_api_key_for_model() {
   case "$1" in
-    OpenRouter-*|openrouter/*)
+    OpenRouter-*|openrouter/*|deepseek/deepseek-v3.2|minimax/minimax-m2.5)
       : "${OPENROUTER_API_KEY:?Please export OPENROUTER_API_KEY before running this benchmark.}"
       ;;
     OpenAI-*|gpt-*|o*)

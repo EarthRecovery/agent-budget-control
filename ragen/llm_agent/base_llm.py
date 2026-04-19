@@ -56,6 +56,18 @@ def _as_int(value: Any) -> Optional[int]:
         return None
 
 
+def _env_flag_is_enabled(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
 def _normalize_usage(usage: Any) -> Optional[Dict[str, Any]]:
     if usage is None:
         return None
@@ -252,7 +264,116 @@ class OpenRouterProvider(LLMProvider):
         self.client = None
         self._client_loop_id = None
 
+    def _uses_gemini_prompt_caching_breakpoints(self) -> bool:
+        return self.model_name.startswith("google/gemini-")
+
+    def _message_has_explicit_cache_control(self, message: Dict[str, Any]) -> bool:
+        content = message.get("content")
+        if not isinstance(content, list):
+            return False
+        for block in content:
+            if isinstance(block, dict) and block.get("cache_control") is not None:
+                return True
+        return False
+
+    def _normalize_content_blocks(self, content: Any) -> List[Dict[str, Any]]:
+        if isinstance(content, list):
+            blocks: List[Dict[str, Any]] = []
+            for item in content:
+                if isinstance(item, dict):
+                    blocks.append(dict(item))
+                else:
+                    blocks.append({"type": "text", "text": str(item)})
+            return blocks
+        if isinstance(content, dict):
+            return [dict(content)]
+        return [{"type": "text", "text": "" if content is None else str(content)}]
+
+    def _apply_gemini_cache_breakpoint(
+        self,
+        messages: List[Dict[str, Any]],
+        cache_control: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        if not messages:
+            return messages
+        if any(self._message_has_explicit_cache_control(message) for message in messages):
+            return messages
+
+        normalized_messages: List[Dict[str, Any]] = []
+        for message in messages:
+            normalized_message = dict(message)
+            normalized_message["content"] = self._normalize_content_blocks(
+                normalized_message.get("content")
+            )
+            normalized_messages.append(normalized_message)
+
+        target_message = normalized_messages[-1]
+        blocks = list(target_message.get("content") or [])
+        cache_payload = dict(cache_control)
+
+        for block_idx in range(len(blocks) - 1, -1, -1):
+            block = blocks[block_idx]
+            if not isinstance(block, dict):
+                continue
+            if block.get("type", "text") != "text":
+                continue
+            updated_block = dict(block)
+            updated_block["cache_control"] = cache_payload
+            blocks[block_idx] = updated_block
+            target_message["content"] = blocks
+            return normalized_messages
+
+        blocks.append({"type": "text", "text": "", "cache_control": cache_payload})
+        target_message["content"] = blocks
+        return normalized_messages
+
+    def _normalize_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(kwargs)
+        thinking_mode = normalized.pop("thinking_mode", None)
+        cache_control = normalized.pop("cache_control", None)
+
+        extra_body = normalized.get("extra_body")
+        if extra_body is None:
+            extra_body = {}
+        elif not isinstance(extra_body, dict):
+            raise ValueError("OpenRouter extra_body must be a dict")
+        else:
+            extra_body = dict(extra_body)
+
+        if thinking_mode is not None:
+            reasoning = extra_body.get("reasoning")
+            if reasoning is None:
+                reasoning = {}
+            elif not isinstance(reasoning, dict):
+                raise ValueError("OpenRouter extra_body.reasoning must be a dict")
+            else:
+                reasoning = dict(reasoning)
+            reasoning.setdefault("effort", str(thinking_mode))
+            extra_body["reasoning"] = reasoning
+
+        explicit_prompt_cache_control = cache_control
+        if explicit_prompt_cache_control is None:
+            explicit_prompt_cache_control = extra_body.get("cache_control")
+
+        if (
+            explicit_prompt_cache_control is not None
+            and self._uses_gemini_prompt_caching_breakpoints()
+        ):
+            normalized["_openrouter_prompt_cache_control"] = dict(explicit_prompt_cache_control)
+            extra_body.pop("cache_control", None)
+        elif cache_control is not None:
+            extra_body["cache_control"] = cache_control
+
+        if extra_body:
+            normalized["extra_body"] = extra_body
+
+        return normalized
+
     async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+        kwargs = self._normalize_kwargs(kwargs)
+        prompt_cache_control = kwargs.pop("_openrouter_prompt_cache_control", None)
+        if prompt_cache_control is not None:
+            messages = self._apply_gemini_cache_breakpoint(messages, prompt_cache_control)
         response = await self._get_client().chat.completions.create(
             model=self.model_name,
             messages=messages,
@@ -398,6 +519,7 @@ class AnthropicProvider(LLMProvider):
         self._client_kwargs = {"api_key": self.api_key}
         self.client = None
         self._client_loop_id = None
+        self.prompt_cache_enabled = _env_flag_is_enabled("ANTHROPIC_PROMPT_CACHE", True)
 
     def _get_client(self) -> AsyncAnthropic:
         loop_id = id(asyncio.get_running_loop())
@@ -408,6 +530,12 @@ class AnthropicProvider(LLMProvider):
 
     def _normalize_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         normalized = dict(kwargs)
+        prompt_cache = normalized.pop("prompt_cache", None)
+        if prompt_cache is not None:
+            self_prompt_cache_enabled = bool(prompt_cache)
+        else:
+            self_prompt_cache_enabled = self.prompt_cache_enabled
+        normalized["_anthropic_prompt_cache_enabled"] = self_prompt_cache_enabled
         # New Claude 4.x models reject/deprecate the temperature parameter.
         if self.model_name.startswith("claude-opus-4") or self.model_name.startswith("claude-sonnet-4"):
             normalized.pop("temperature", None)
@@ -442,6 +570,48 @@ class AnthropicProvider(LLMProvider):
             normalized["output_config"] = normalized_output_config
         return normalized
 
+    def _make_text_block(self, text: str, *, cache: bool = False) -> Dict[str, Any]:
+        block: Dict[str, Any] = {"type": "text", "text": text}
+        if cache:
+            block["cache_control"] = {"type": "ephemeral"}
+        return block
+
+    def _prepare_anthropic_messages(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        prompt_cache_enabled: bool,
+    ) -> tuple[Any, List[Dict[str, Any]]]:
+        system_content = ""
+        chat_messages: List[Dict[str, Any]] = []
+
+        for msg in messages:
+            if msg["role"] == "system":
+                system_content = msg["content"]
+            else:
+                chat_messages.append(
+                    {
+                        "role": "assistant" if msg["role"] == "assistant" else "user",
+                        "content": [self._make_text_block(msg["content"])],
+                    }
+                )
+
+        if not prompt_cache_enabled:
+            return system_content, chat_messages
+
+        # Anthropic prompt caching works via cache breakpoints on content blocks.
+        # By default, cache the largest reusable prefix while leaving the final
+        # user query uncached. This is usually the estimation instruction in our
+        # workloads and changes most frequently between requests.
+        if len(chat_messages) >= 2:
+            chat_messages[-2]["content"][-1]["cache_control"] = {"type": "ephemeral"}
+        elif system_content:
+            system_content = [self._make_text_block(system_content, cache=True)]
+        elif chat_messages:
+            chat_messages[0]["content"][-1]["cache_control"] = {"type": "ephemeral"}
+
+        return system_content, chat_messages
+
     async def close(self) -> None:
         if self.client is None:
             return
@@ -451,20 +621,12 @@ class AnthropicProvider(LLMProvider):
     
     async def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
         kwargs = self._normalize_kwargs(kwargs)
-        # Extract system message if present
-        system_content = ""
-        chat_messages = []
-        
-        for msg in messages:
-            if msg["role"] == "system":
-                system_content = msg["content"]
-            else:
-                # Map to Anthropic's format
-                chat_messages.append({
-                    "role": "assistant" if msg["role"] == "assistant" else "user",
-                    "content": msg["content"]
-                })
-        
+        prompt_cache_enabled = bool(kwargs.pop("_anthropic_prompt_cache_enabled", self.prompt_cache_enabled))
+        system_content, chat_messages = self._prepare_anthropic_messages(
+            messages,
+            prompt_cache_enabled=prompt_cache_enabled,
+        )
+
         response = await self._get_client().messages.create(
             model=self.model_name,
             system=system_content,

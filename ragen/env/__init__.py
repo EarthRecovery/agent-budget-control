@@ -110,6 +110,13 @@ _register_env(
     env_class="TokenEstimationEnv",
 )
 _register_env(
+    "money_estimation",
+    config_module=".money_estimation.config",
+    config_class="MoneyEstimationEnvConfig",
+    env_module=".money_estimation.env",
+    env_class="MoneyEstimationEnv",
+)
+_register_env(
     "alfworld",
     config_module=".alfworld.config",
     config_class="AlfredEnvConfig",

@@ -59,13 +59,49 @@ model_info:
     generation_kwargs:
       temperature: 0
       max_tokens: 800
+  "deepseek/deepseek-v3.2":
+    provider_name: openrouter
+    model_name: deepseek/deepseek-v3.2
+    generation_kwargs:
+      temperature: 0
+      max_tokens: 800
+  "minimax/minimax-m2.7":
+    provider_name: openrouter
+    model_name: minimax/minimax-m2.7
+    generation_kwargs:
+      temperature: 0
+      max_tokens: 800
+  "OpenRouter-Gemini-3.1-Pro-Preview":
+    provider_name: openrouter
+    model_name: google/gemini-3.1-pro-preview
+    generation_kwargs:
+      temperature: 0
+      max_tokens: 800
+      thinking_mode: low
+      extra_body:
+        cache_control:
+          type: ephemeral
+  "OpenRouter-Kimi-K2.5":
+    provider_name: openrouter
+    model_name: moonshotai/kimi-k2.5
+    generation_kwargs:
+      temperature: 0
+      max_tokens: 800
+  "qwen/qwen3-235b-a22b-2507":
+    provider_name: openrouter
+    model_name: qwen/qwen3-235b-a22b-2507
+    generation_kwargs:
+      temperature: 0
+      max_tokens: 800
+      thinking_mode: low
+      extra_body:
+        cache_control:
+          type: ephemeral
   Claude-Opus-4.7-low-thinking:
     provider_name: anthropic
     model_name: claude-opus-4-7
     generation_kwargs:
       max_tokens: 800
-      # thinking:
-      #   type: disable
       output_config:
         effort: low
   Claude-Sonnet-4.6-low-thinking:
@@ -73,8 +109,6 @@ model_info:
     model_name: claude-sonnet-4-6
     generation_kwargs:
       max_tokens: 800
-      # thinking:
-      #   type: disable
       output_config:
         effort: low
   Gemini-2.5-Pro:

@@ -675,7 +675,8 @@ class ContextManager:
     def _build_format_prompt(self, env_id: int) -> Tuple[str, str]:
         """Build FORMAT_PROMPT and LENGTH_PROMPT for an environment."""
         answer_format = (
-            "<think> [Your thoughts] </think> <answer> [your answer] </answer>"
+            "<think> [Your thoughts, typically 2-4 sentences,less than 500 tokens] </think> "
+            "<answer> [your answer] </answer>"
             if self.config.agent_proxy.enable_think
             else "<answer> [your answer] </answer>"
         )

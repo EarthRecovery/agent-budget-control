@@ -45,6 +45,15 @@ def _load_optional_text(path: Optional[str]) -> Optional[str]:
         return handle.read()
 
 
+def _parse_bool_flag(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Expected a boolean value, got: {value}")
+
+
 def _safe_mean(values: List[float]) -> Optional[float]:
     filtered = [float(value) for value in values if value is not None]
     if not filtered:
@@ -117,11 +126,13 @@ def main() -> None:
     parser.add_argument("--max-turn", type=int, default=5, help="Legacy rollout turn budget retained for compatibility")
     parser.add_argument("--max-context-window-tokens", type=int, default=81920, help="Total token budget used for can-finish evaluation")
     parser.add_argument("--reasoning-effort", default=None, help="Optional reasoning_effort passed through to compatible models")
+    parser.add_argument("--reasoning-enabled", type=_parse_bool_flag, default=None, help="Optional OpenRouter reasoning.enabled override")
     parser.add_argument("--thinking-enabled", action="store_true", help="Enable Anthropic extended thinking")
     parser.add_argument("--thinking-budget-tokens", type=int, default=None, help="Anthropic thinking budget_tokens")
     parser.add_argument("--thinking-adaptive", action="store_true", help="Use Anthropic adaptive thinking")
     parser.add_argument("--thinking-display", default=None, help="Anthropic adaptive thinking display mode")
     parser.add_argument("--output-effort", default=None, help="Anthropic output_config.effort")
+    parser.add_argument("--cache-enabled", action="store_true", help="Attach OpenRouter cache_control={type:ephemeral}")
     parser.add_argument("--system-prompt-file", default=None, help="Optional txt file to override system prompt template")
     parser.add_argument("--user-prompt-file", default=None, help="Optional txt file to override user prompt template")
     parser.add_argument("--disable-source-system", action="store_true", help="Do not include original rollout system in user prompt")
@@ -197,7 +208,20 @@ def main() -> None:
             generate_kwargs["thinking"] = thinking_kwargs
         if args.output_effort:
             generate_kwargs["output_config"] = {"effort": str(args.output_effort)}
-    if args.reasoning_effort:
+    if provider_lower == "openrouter":
+        openrouter_extra_body: Dict[str, Any] = {}
+        openrouter_reasoning: Dict[str, Any] = {}
+        if args.reasoning_effort:
+            openrouter_reasoning["effort"] = str(args.reasoning_effort)
+        if args.reasoning_enabled is not None:
+            openrouter_reasoning["enabled"] = bool(args.reasoning_enabled)
+        if openrouter_reasoning:
+            openrouter_extra_body["reasoning"] = openrouter_reasoning
+        if args.cache_enabled:
+            openrouter_extra_body["cache_control"] = {"type": "ephemeral"}
+        if openrouter_extra_body:
+            generate_kwargs["extra_body"] = openrouter_extra_body
+    elif args.reasoning_effort:
         generate_kwargs["reasoning_effort"] = str(args.reasoning_effort)
 
     results: List[Dict[str, Any]] = []
@@ -217,7 +241,7 @@ def main() -> None:
                 indexed_samples.append((sample_index, sample))
                 messages_list.append(env.build_api_messages(sample))
 
-            print("[DEBUG] Messages List:", messages_list)
+            # print("[DEBUG] Messages List:", messages_list)
             batch_results, _ = llm.run_batch(
                 messages_list=messages_list,
                 **generate_kwargs,

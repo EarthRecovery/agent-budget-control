@@ -459,7 +459,7 @@ def test_eval_compliance_omits_length_prompt_from_context(dummy_config):
         env_id=0,
     )
 
-    assert format_prompt == "<think> [Your thoughts] </think> <answer> [your answer] </answer>"
+    assert format_prompt == "<think> [Your thoughts, typically 2 sentences,less than 100 tokens] </think> <answer> [your answer] </answer>"
     assert length_prompt == ""
     assert "Max response length:" not in turn_content
     assert "<budget-thinking>" not in turn_content
@@ -483,7 +483,7 @@ def test_eval_turn_compliance_omits_length_prompt_from_context(dummy_config):
         env_id=0,
     )
 
-    assert format_prompt == "<think> [Your thoughts] </think> <answer> [your answer] </answer>"
+    assert format_prompt == "<think> [Your thoughts, typically 2 sentences,less than 100 tokens] </think> <answer> [your answer] </answer>"
     assert length_prompt == ""
     assert "Max response length:" not in turn_content
     assert "<budget-thinking>" not in turn_content
@@ -577,7 +577,7 @@ def test_eval_toolcall_compliance_omits_length_prompt_from_context(dummy_config)
         env_id=0,
     )
 
-    assert format_prompt == "<think> [Your thoughts] </think> <answer> [your answer] </answer>"
+    assert format_prompt == "<think> [Your thoughts, typically 2 sentences,less than 100 tokens] </think> <answer> [your answer] </answer>"
     assert length_prompt == ""
     assert "Max response length:" not in turn_content
     assert "<budget-thinking>" not in turn_content

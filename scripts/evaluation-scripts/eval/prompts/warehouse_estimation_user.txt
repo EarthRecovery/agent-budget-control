@@ -1,0 +1,24 @@
+Based on the provided warehouse rollout context, you are given the following information:
+1. You have completed {completed_weeks} weeks in {completed_turns} turns.
+2. Current cumulative usage so far:
+   - time_weeks: {current_time_weeks}
+   - warehouse_item_weeks: {current_warehouse_item_weeks}
+   - cumulative_cost_usd: {current_cost_usd}
+3. Current cash is {current_cash_usd} USD. To count as finished, final cash must reach at least {target_cash_usd} USD.
+4. Historical resource consumption by completed step is:
+{resource_consumption_text}
+5. The rollout must finish within all three budgets:
+   - time_weeks <= {budget_time_weeks}
+   - warehouse_item_weeks <= {budget_warehouse_item_weeks}
+   - cumulative_cost_usd <= {budget_cost_usd}
+
+Now, estimate:
+1. Whether the rollout can still finish successfully within all three budgets while also reaching the target cash.
+2. If yes, how much additional usage is still needed from the next turn onward. Return one interval for each metric.
+3. If no, answer "impossible".
+4. Prioritize the can-finish judgment over interval tightness. If you think the rollout can finish within budget, make each interval as tight as possible while still covering the true remaining value.
+
+Output exactly one of the following:
+<think>[YOUR THINKING]</think><answer>time_weeks:[est_low, est_high], warehouse_item_weeks:[est_low, est_high], cumulative_cost_usd:[est_low, est_high]</answer>
+or
+<think>[YOUR THINKING]</think><answer>impossible</answer>

@@ -1,0 +1,7 @@
+benchmark,model,slug,rollout_success_rate,rollout_avg_turns,first_turn_success_pred_acc,estimation_total,estimation_success_rollouts,estimation_fail_rollouts,pred_hit_success_rollouts,pred_hit_fail_rollouts,success_rollout_interval_hit_rate,success_rollout_custom_reward
+SearchR1,GPT-5.2 Instant,searchr1-gpt5.2instant,0.6796875,3.6875,0.672,324,201,123,1.0,0.0,0.21393034825870647,0.03126824404065045
+SearchR1,Claude Opus 4.7 Low Thinking,searchr1-claude-opus-4.7-low-thinking,0.7578125,1.78125,0.6515151515151515,87,52,35,1.0,0.02857142857142857,0.23076923076923078,0.1144690177643189
+SearchR1,Claude Sonnet 4.6 Low Thinking,searchr1-claude-sonnet-4.6-low-thinking,0.7109375,1.8671875,0.609375,102,52,50,0.9807692307692307,0.0,0.36538461538461536,0.1543992444544862
+Sokoban,GPT-5.2 Instant,sokoban-gpt5.2instant,0.3515625,9.0234375,0.3543307086614173,661,189,472,0.9627659574468085,0.19915254237288135,0.35978835978835977,0.16681351862111368
+Sokoban,Claude Opus 4.7 Low Thinking,sokoban-claude-opus-4.7-low-thinking,0.5625,5.0390625,0.6147540983606558,355,207,148,1.0,0.08163265306122448,0.463768115942029,0.11168485041514631
+Sokoban,Claude Sonnet 4.6 Low Thinking,sokoban-claude-sonnet-4.6-low-thinking,0.515625,5.6484375,0.5555555555555556,400,215,185,0.9720930232558139,0.21081081081081082,0.4511627906976744,0.14825414343288762

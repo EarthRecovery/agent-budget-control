@@ -159,3 +159,56 @@ def test_openai_provider_rebuilds_async_client_when_event_loop_changes(monkeypat
 
     assert len(created_clients) == 2
     assert first_client != second_client
+
+
+def test_openrouter_gemini_moves_cache_control_into_last_message_block(monkeypatch):
+    captured_calls = []
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured_calls.append(kwargs)
+            message = type("Message", (), {"content": "ok"})()
+            choice = type("Choice", (), {"finish_reason": "stop", "message": message})()
+            return type(
+                "Response",
+                (),
+                {"choices": [choice], "model": kwargs["model"], "usage": None, "id": "req_gemini"},
+            )()
+
+    class FakeChat:
+        def __init__(self):
+            self.completions = FakeCompletions()
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = FakeChat()
+
+    monkeypatch.setattr(base_llm, "AsyncOpenAI", FakeAsyncOpenAI)
+    provider = base_llm.OpenRouterProvider(
+        model_name="google/gemini-2.5-pro",
+        api_key="test-key",
+    )
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "first turn"},
+        {"role": "assistant", "content": "assistant reply"},
+        {"role": "user", "content": "latest turn"},
+    ]
+
+    asyncio.run(
+        provider.generate(
+            messages,
+            extra_body={"cache_control": {"type": "ephemeral"}},
+        )
+    )
+
+    assert len(captured_calls) == 1
+    request = captured_calls[0]
+    assert "extra_body" not in request or "cache_control" not in request.get("extra_body", {})
+    assert request["messages"][-1]["content"] == [
+        {
+            "type": "text",
+            "text": "latest turn",
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
