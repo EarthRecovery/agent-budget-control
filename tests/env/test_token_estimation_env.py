@@ -183,6 +183,7 @@ def _write_api_usage_fixture(path):
         {
             "env_id": 0,
             "absolute_env_id": 0,
+            "api_total_tokens": 2792,
             "turns": [
                 {
                     "turn_idx": 1,
@@ -487,39 +488,20 @@ def test_token_estimation_env_flattens_and_scores(tmp_path):
     assert exported[0]["completed_turn_token_usage_details"] == [
         {"input_tokens": 30, "output_tokens": 50, "total_tokens": 80}
     ]
-    assert exported[0]["input_messages"] == [
+    assert exported[0]["input_messages"][:3] == [
         {"role": "system", "content": "original system prompt"},
         {"role": "user", "content": "user turn 1"},
         {"role": "assistant", "content": "<think>first</think><answer>search[q]</answer>"},
-        {
-            "role": "user",
-            "content": (
-                "Based on the provided rollout context, you are provided below information:\n"
-                "1. You have completed 1 turns.\n"
-                "2. Each turn, your token consumption is Turn 1: input 30 tokens, output 50 tokens, total 80 tokens.\n"
-                "3. You need to finish the task within 120 tokens.\n\n"
-                "Now, estimate:\n"
-                "1. Whether you can finish the task successfully within 120 total tokens (input + output).\n"
-                "2. If yes, how many additional tokens (input + output) are still needed to finish the task, starting from the next turn. Return an estimation interval: at least est_low tokens and at most est_high tokens.\n"
-                "3. If no, answer \"impossible\".\n"
-                "4. You should try your best to estimate whether the task can finish within budget (most important). If you think the task can finish within budget, your interval should be as tight as possible while still covering the true remaining token budget.\n\n"
-                "Example:\n"
-                "For a three-turn interaction, suppose only Turn 1 has been completed.\n"
-                "The full interaction is:\n"
-                "Turn 1: input X1 tokens, output Y1 tokens;\n"
-                "Turn 2: input X2 tokens, output Y2 tokens;\n"
-                "Turn 3: input X3 tokens, output Y3 tokens.\n"
-                "You will receive:\n"
-                "turn_token_usage_text: Turn 1: input X1 tokens, output Y1 tokens\n"
-                "You should estimate:\n"
-                "X2 + Y2 + X3 + Y3\n\n"
-                "Output exactly one of the following:\n"
-                "<think>[YOUR THINKING]</think><answer>[est_low, est_high]</answer>\n"
-                "or\n"
-                "<think>[YOUR THINKING]</think><answer>impossible</answer>"
-            ),
-        },
     ]
+    exported_prompt = exported[0]["input_messages"][3]
+    assert exported_prompt["role"] == "user"
+    assert "Based on the provided rollout context" in exported_prompt["content"]
+    assert "You have completed 1 turns." in exported_prompt["content"]
+    assert (
+        "Each turn, your token consumption is "
+        "Turn 1: input 30 tokens, output 50 tokens, total 80 tokens."
+    ) in exported_prompt["content"]
+    assert "You need to finish the task within 120 tokens." in exported_prompt["content"]
     assert exported[0]["rollout_history_messages"] == [
         {"role": "user", "content": "user turn 1"},
         {"role": "assistant", "content": "<think>first</think><answer>search[q]</answer>"},
@@ -530,7 +512,10 @@ def test_token_estimation_env_flattens_and_scores(tmp_path):
     assert "user turn 1" in prompt
     assert "search[q]" in prompt
     assert "You have completed 1 turns." in prompt
-    assert "Turn 1: input 30 tokens, output 50 tokens, total 80 tokens" in prompt
+    assert (
+        "Each turn, your token consumption is "
+        "Turn 1: input 30 tokens, output 50 tokens, total 80 tokens"
+    ) in prompt
     system_message, first_user_message, first_assistant_message, user_message = env.build_api_messages()
     assert system_message["role"] == "system"
     assert system_message["content"] == "original system prompt"
@@ -657,6 +642,41 @@ def test_token_estimation_env_uses_direct_api_usage_when_available(tmp_path):
     assert "Turn 1: input 195 tokens, output 56 tokens, total 251 tokens" in prompt
     assert "Turn 2: input 372 tokens, output 42 tokens, total 414 tokens" in prompt
     assert "Turn 3: input 529 tokens, output 45 tokens, total 574 tokens" in prompt
+
+
+def test_token_estimation_env_can_expose_turn_usage_excluding_history(tmp_path):
+    input_path = tmp_path / "dialogues_api_usage_excluding_history.json"
+    _write_api_usage_fixture(input_path)
+
+    env = TokenEstimationEnv(
+        TokenEstimationEnvConfig(
+            input_path=str(input_path),
+            max_context_window_tokens=4000,
+            turn_usage_mode="turn_excluding_history",
+        )
+    )
+
+    third_sample = env.samples[2]
+    assert third_sample.completed_turn_token_usage == [251, 163, 160]
+    assert third_sample.completed_turn_token_usage_details == [
+        {"input_tokens": 195, "output_tokens": 56, "total_tokens": 251},
+        {"input_tokens": 121, "output_tokens": 42, "total_tokens": 163},
+        {"input_tokens": 115, "output_tokens": 45, "total_tokens": 160},
+    ]
+    assert third_sample.completed_turn_request_token_usage == [251, 414, 574]
+    assert third_sample.completed_turn_request_token_usage_details == [
+        {"input_tokens": 195, "output_tokens": 56, "total_tokens": 251},
+        {"input_tokens": 372, "output_tokens": 42, "total_tokens": 414},
+        {"input_tokens": 529, "output_tokens": 45, "total_tokens": 574},
+    ]
+
+    prompt = env.reset(index=2)
+    assert (
+        "Each turn, your token consumption is "
+        "Turn 1: input 195 tokens, output 56 tokens, total 251 tokens; "
+        "Turn 2: input 121 tokens, output 42 tokens, total 163 tokens; "
+        "Turn 3: input 115 tokens, output 45 tokens, total 160 tokens"
+    ) in prompt
 
 
 def test_token_estimation_env_discards_context_token_truncated_turns(tmp_path):

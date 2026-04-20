@@ -16,6 +16,7 @@ RUN_NAME=${RUN_NAME:-}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 SYSTEM_PROMPT_FILE=${SYSTEM_PROMPT_FILE:-"$SCRIPT_DIR/prompts/swebanch_estimation_system.txt"}
 USER_PROMPT_FILE=${USER_PROMPT_FILE:-"$SCRIPT_DIR/prompts/swebanch_estimation_user.txt"}
+TURN_USAGE_MODE=${TURN_USAGE_MODE:-turn_excluding_history}
 
 MAX_TURN=${MAX_TURN:-20}
 MAX_CONTEXT_WINDOW_TOKENS=${MAX_CONTEXT_WINDOW_TOKENS:-131072}
@@ -107,6 +108,7 @@ CMD=(
   --top-k "$TOP_K"
   --max-turn "$MAX_TURN"
   --max-context-window-tokens "$MAX_CONTEXT_WINDOW_TOKENS"
+  --turn-usage-mode "$TURN_USAGE_MODE"
   --system-prompt-file "$SYSTEM_PROMPT_FILE"
   --user-prompt-file "$USER_PROMPT_FILE"
   --tensor-parallel-size "$TP_SIZE"

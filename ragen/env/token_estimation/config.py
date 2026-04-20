@@ -43,3 +43,4 @@ class TokenEstimationEnvConfig:
     include_source_system: bool = True
     system_prompt_template: str = field(default=DEFAULT_SYSTEM_PROMPT_TEMPLATE)
     user_prompt_template: str = field(default=DEFAULT_USER_PROMPT_TEMPLATE)
+    turn_usage_mode: str = "request"

@@ -1,6 +1,6 @@
 Based on the provided SWE-bench rollout context, you are given the following:
 1. The coding agent has completed {completed_turns} turns.
-2. Per-turn token usage so far is: {turn_token_usage_text}.
+2. Per-turn token usage so far, excluding reused history from earlier turns, is: {turn_token_usage_text}.
 3. The full task must finish within {max_context_window_tokens} total tokens.
 
 Estimate:

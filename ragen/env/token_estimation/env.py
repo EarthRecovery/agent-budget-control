@@ -13,6 +13,8 @@ from .config import TokenEstimationEnvConfig
 
 _TRUE_VALUES = {"1", "true", "yes", "y"}
 _FALSE_VALUES = {"0", "false", "no", "n"}
+_TURN_USAGE_MODE_REQUEST = "request"
+_TURN_USAGE_MODE_TURN_EXCLUDING_HISTORY = "turn_excluding_history"
 
 
 @dataclass
@@ -30,6 +32,8 @@ class TokenEstimationSample:
     relative_progress: float
     completed_turn_token_usage: List[int]
     completed_turn_token_usage_details: List[Dict[str, Optional[int]]]
+    completed_turn_request_token_usage: Optional[List[int]]
+    completed_turn_request_token_usage_details: Optional[List[Dict[str, Optional[int]]]]
     actual_tokens_used_so_far: int
     actual_can_finish: bool
     actual_remaining_turn: int
@@ -178,6 +182,93 @@ def _resolve_turn_token_usage_detail(turn: Dict[str, Any]) -> Dict[str, Optional
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
     }
+
+
+def _normalize_usage_detail(
+    detail: Dict[str, Optional[int]],
+) -> Dict[str, Optional[int]]:
+    input_tokens = _safe_int(detail.get("input_tokens"))
+    output_tokens = _safe_int(detail.get("output_tokens"))
+    total_tokens = _safe_int(detail.get("total_tokens"))
+    if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+        total_tokens = int(input_tokens or 0) + int(output_tokens or 0)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _request_usage_input_includes_history(
+    request_details: List[Dict[str, Optional[int]]],
+) -> bool:
+    comparable = 0
+    history_votes = 0
+    prev_request_total: Optional[int] = None
+    for detail in request_details:
+        current_input = detail.get("input_tokens")
+        if prev_request_total is not None and current_input is not None:
+            comparable += 1
+            if int(current_input) >= int(prev_request_total):
+                history_votes += 1
+        current_total = detail.get("total_tokens")
+        if current_total is not None:
+            prev_request_total = int(current_total)
+    if comparable == 0:
+        return False
+    return history_votes * 2 >= comparable
+
+
+def _convert_request_usage_to_turn_usage(
+    request_details: List[Dict[str, Optional[int]]],
+) -> List[Dict[str, Optional[int]]]:
+    normalized_request_details = [
+        _normalize_usage_detail(detail) for detail in request_details
+    ]
+    input_includes_history = _request_usage_input_includes_history(
+        normalized_request_details
+    )
+
+    turn_usage_details: List[Dict[str, Optional[int]]] = []
+    prev_request_total: Optional[int] = None
+    for detail in normalized_request_details:
+        request_input_tokens = detail.get("input_tokens")
+        output_tokens = detail.get("output_tokens")
+        request_total_tokens = detail.get("total_tokens")
+
+        if (
+            input_includes_history
+            and request_input_tokens is not None
+            and prev_request_total is not None
+        ):
+            input_tokens = max(
+                0,
+                int(request_input_tokens) - int(prev_request_total),
+            )
+        else:
+            input_tokens = request_input_tokens
+
+        if input_tokens is not None and output_tokens is not None:
+            total_tokens = int(input_tokens) + int(output_tokens)
+        elif not input_includes_history:
+            total_tokens = request_total_tokens
+        elif input_tokens is not None:
+            total_tokens = int(input_tokens)
+        else:
+            total_tokens = None
+
+        turn_usage_details.append(
+            {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+            }
+        )
+
+        if request_total_tokens is not None:
+            prev_request_total = int(request_total_tokens)
+
+    return turn_usage_details
 
 
 def _usage_details_look_cumulative(
@@ -381,6 +472,10 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
 
     def _flatten_rollouts(self, rollouts: List[Dict[str, Any]]) -> List[TokenEstimationSample]:
         samples: List[TokenEstimationSample] = []
+        use_turn_usage_excluding_history = (
+            str(self.config.turn_usage_mode).strip().lower()
+            == _TURN_USAGE_MODE_TURN_EXCLUDING_HISTORY
+        )
         for rollout_index, rollout in enumerate(rollouts):
             sorted_raw_turns = sorted(
                 list(rollout.get("turns") or []),
@@ -406,13 +501,25 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
             raw_per_turn_token_usage_details = [
                 _resolve_turn_token_usage_detail(turn) for turn in turns
             ]
+            request_token_usage_details = [
+                _normalize_usage_detail(detail)
+                for detail in raw_per_turn_token_usage_details
+            ]
+            local_turn_token_usage_details = _convert_request_usage_to_turn_usage(
+                request_token_usage_details
+            )
+            per_turn_token_usage_details = (
+                local_turn_token_usage_details
+                if use_turn_usage_excluding_history
+                else request_token_usage_details
+            )
             assume_cumulative = _infer_usage_mode_from_rollout(
                 rollout,
-                raw_per_turn_token_usage_details,
+                request_token_usage_details,
             )
-            per_turn_token_usage_details, cumulative_turn_totals, _ = (
+            budget_token_usage_details, cumulative_turn_totals, _ = (
                 _normalize_turn_usage_details(
-                    raw_per_turn_token_usage_details,
+                    request_token_usage_details,
                     assume_cumulative=assume_cumulative,
                 )
             )
@@ -463,9 +570,23 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                 completed_turn_token_usage_details = [
                     dict(detail) for detail in per_turn_token_usage_details[:completed_turns]
                 ]
+                completed_turn_request_token_usage = None
+                completed_turn_request_token_usage_details = None
+                if use_turn_usage_excluding_history:
+                    completed_turn_request_token_usage = [
+                        int(detail.get("total_tokens") or 0)
+                        for detail in request_token_usage_details[:completed_turns]
+                    ]
+                    completed_turn_request_token_usage_details = [
+                        dict(detail)
+                        for detail in request_token_usage_details[:completed_turns]
+                    ]
                 current_total_tokens = per_turn_total_tokens[completed_turns - 1]
                 actual_tokens_used_so_far = (
-                    sum(completed_turn_token_usage)
+                    sum(
+                        int(detail.get("total_tokens") or 0)
+                        for detail in budget_token_usage_details[:completed_turns]
+                    )
                     if current_total_tokens is None
                     else int(current_total_tokens)
                 )
@@ -495,6 +616,8 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                         relative_progress=relative_progress,
                         completed_turn_token_usage=completed_turn_token_usage,
                         completed_turn_token_usage_details=completed_turn_token_usage_details,
+                        completed_turn_request_token_usage=completed_turn_request_token_usage,
+                        completed_turn_request_token_usage_details=completed_turn_request_token_usage_details,
                         actual_tokens_used_so_far=actual_tokens_used_so_far,
                         actual_can_finish=actual_can_finish,
                         actual_remaining_turn=actual_remaining_turn,
@@ -592,27 +715,32 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
         payload = []
         for sample in self.samples:
             api_messages = self.build_api_messages(sample)
-            payload.append(
-                {
-                    "sample_id": sample.sample_id,
-                    "rollout_index": sample.rollout_index,
-                    "turn_idx": sample.turn_idx,
-                    "input_messages": api_messages,
-                    "rollout_history_messages": sample.input_messages,
-                    "input_text": self._render_api_messages(api_messages),
-                    "estimation_user_prompt": self.build_user_prompt(sample),
-                    "output": sample.target_output,
-                    "source_system": sample.source_system,
-                    "completed_turns": sample.completed_turns,
-                    "total_turns": sample.total_turns,
-                    "relative_progress": sample.relative_progress,
-                    "completed_turn_token_usage": sample.completed_turn_token_usage,
-                    "completed_turn_token_usage_details": sample.completed_turn_token_usage_details,
-                    "actual_tokens_used_so_far": sample.actual_tokens_used_so_far,
-                    "actual_can_finish": sample.actual_can_finish,
-                    "actual_remaining_total_tokens": sample.actual_remaining_total_tokens,
-                }
-            )
+            record = {
+                "sample_id": sample.sample_id,
+                "rollout_index": sample.rollout_index,
+                "turn_idx": sample.turn_idx,
+                "input_messages": api_messages,
+                "rollout_history_messages": sample.input_messages,
+                "input_text": self._render_api_messages(api_messages),
+                "estimation_user_prompt": self.build_user_prompt(sample),
+                "output": sample.target_output,
+                "source_system": sample.source_system,
+                "completed_turns": sample.completed_turns,
+                "total_turns": sample.total_turns,
+                "relative_progress": sample.relative_progress,
+                "completed_turn_token_usage": sample.completed_turn_token_usage,
+                "completed_turn_token_usage_details": sample.completed_turn_token_usage_details,
+                "actual_tokens_used_so_far": sample.actual_tokens_used_so_far,
+                "actual_can_finish": sample.actual_can_finish,
+                "actual_remaining_total_tokens": sample.actual_remaining_total_tokens,
+            }
+            if sample.completed_turn_request_token_usage is not None:
+                record["completed_turn_request_token_usage"] = sample.completed_turn_request_token_usage
+            if sample.completed_turn_request_token_usage_details is not None:
+                record["completed_turn_request_token_usage_details"] = (
+                    sample.completed_turn_request_token_usage_details
+                )
+            payload.append(record)
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
         return path

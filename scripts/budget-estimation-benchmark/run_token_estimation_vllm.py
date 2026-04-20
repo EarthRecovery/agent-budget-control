@@ -201,6 +201,12 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=-1, help="Sampling top-k")
     parser.add_argument("--max-turn", type=int, default=5, help="Legacy rollout turn budget retained for compatibility")
     parser.add_argument("--max-context-window-tokens", type=int, default=81920, help="Total token budget used for can-finish evaluation")
+    parser.add_argument(
+        "--turn-usage-mode",
+        choices=["request", "turn_excluding_history"],
+        default="request",
+        help="How to interpret per-turn usage exposed to the estimator",
+    )
     parser.add_argument("--system-prompt-file", default=None, help="Optional txt file to override system prompt template")
     parser.add_argument("--user-prompt-file", default=None, help="Optional txt file to override user prompt template")
     parser.add_argument("--disable-source-system", action="store_true", help="Do not include original rollout system in user prompt")
@@ -233,6 +239,7 @@ def main() -> None:
         include_source_system=not bool(args.disable_source_system),
         system_prompt_template=system_prompt_template or DEFAULT_SYSTEM_PROMPT_TEMPLATE,
         user_prompt_template=user_prompt_template or DEFAULT_USER_PROMPT_TEMPLATE,
+        turn_usage_mode=str(args.turn_usage_mode),
     )
     env = TokenEstimationEnv(env_config)
 
@@ -404,6 +411,25 @@ def main() -> None:
                 env.reset(index=sample_index)
                 api_messages = api_messages_by_sample_index[sample_index]
                 _, _, _, info = env.step(api_result.get("response", ""))
+                ground_truth = {
+                    "actual_tokens_used_so_far": sample.actual_tokens_used_so_far,
+                    "actual_can_finish": sample.actual_can_finish,
+                    "actual_remaining_total_tokens": sample.actual_remaining_total_tokens,
+                    "relative_progress": sample.relative_progress,
+                    "completed_turns": sample.completed_turns,
+                    "total_turns": sample.total_turns,
+                    "completed_turn_token_usage": sample.completed_turn_token_usage,
+                    "completed_turn_token_usage_details": sample.completed_turn_token_usage_details,
+                    "rollout_success": sample.rollout_success,
+                }
+                if sample.completed_turn_request_token_usage is not None:
+                    ground_truth["completed_turn_request_token_usage"] = (
+                        sample.completed_turn_request_token_usage
+                    )
+                if sample.completed_turn_request_token_usage_details is not None:
+                    ground_truth["completed_turn_request_token_usage_details"] = (
+                        sample.completed_turn_request_token_usage_details
+                    )
                 results.append(
                     {
                         "sample_id": sample.sample_id,
@@ -418,15 +444,7 @@ def main() -> None:
                         "trim_info": trim_info_by_sample_index[sample_index],
                         "estimation_user_prompt": env.build_user_prompt(sample),
                         "target_output": sample.target_output,
-                        "ground_truth": {
-                            "actual_tokens_used_so_far": sample.actual_tokens_used_so_far,
-                            "actual_can_finish": sample.actual_can_finish,
-                            "actual_remaining_total_tokens": sample.actual_remaining_total_tokens,
-                            "relative_progress": sample.relative_progress,
-                            "completed_turns": sample.completed_turns,
-                            "total_turns": sample.total_turns,
-                            "rollout_success": sample.rollout_success,
-                        },
+                        "ground_truth": ground_truth,
                         "prediction": info.get("prediction"),
                         "metrics": info.get("metrics"),
                         "api_result": {
