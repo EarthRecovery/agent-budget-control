@@ -669,6 +669,8 @@ def test_token_estimation_env_can_expose_turn_usage_excluding_history(tmp_path):
         {"input_tokens": 372, "output_tokens": 42, "total_tokens": 414},
         {"input_tokens": 529, "output_tokens": 45, "total_tokens": 574},
     ]
+    assert third_sample.actual_tokens_used_so_far == 574
+    assert third_sample.actual_remaining_total_tokens == 979
 
     prompt = env.reset(index=2)
     assert (

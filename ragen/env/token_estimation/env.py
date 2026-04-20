@@ -199,6 +199,21 @@ def _normalize_usage_detail(
     }
 
 
+def _build_cumulative_totals_from_details(
+    details: List[Dict[str, Optional[int]]],
+) -> List[Optional[int]]:
+    cumulative_totals: List[Optional[int]] = []
+    running_total = 0
+    for detail in details:
+        total_tokens = _safe_int(detail.get("total_tokens"))
+        if total_tokens is None:
+            cumulative_totals.append(None)
+            continue
+        running_total += int(total_tokens)
+        cumulative_totals.append(running_total)
+    return cumulative_totals
+
+
 def _request_usage_input_includes_history(
     request_details: List[Dict[str, Optional[int]]],
 ) -> bool:
@@ -523,7 +538,17 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                     assume_cumulative=assume_cumulative,
                 )
             )
-            per_turn_total_tokens = list(cumulative_turn_totals)
+            actual_budget_usage_details = (
+                per_turn_token_usage_details
+                if use_turn_usage_excluding_history
+                else budget_token_usage_details
+            )
+            actual_budget_cumulative_totals = (
+                _build_cumulative_totals_from_details(actual_budget_usage_details)
+                if use_turn_usage_excluding_history
+                else list(cumulative_turn_totals)
+            )
+            per_turn_total_tokens = list(actual_budget_cumulative_totals)
             total_rollout_tokens = (
                 None
                 if any(token_value is None for token_value in per_turn_total_tokens)
@@ -580,12 +605,12 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                     completed_turn_request_token_usage_details = [
                         dict(detail)
                         for detail in request_token_usage_details[:completed_turns]
-                    ]
+                ]
                 current_total_tokens = per_turn_total_tokens[completed_turns - 1]
                 actual_tokens_used_so_far = (
                     sum(
                         int(detail.get("total_tokens") or 0)
-                        for detail in budget_token_usage_details[:completed_turns]
+                        for detail in actual_budget_usage_details[:completed_turns]
                     )
                     if current_total_tokens is None
                     else int(current_total_tokens)
