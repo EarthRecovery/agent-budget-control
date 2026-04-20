@@ -34,6 +34,7 @@ DTYPE=${DTYPE:-bfloat16}
 GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.85}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-32768}
 MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-32768}
+MAX_INPUT_TOKENS=${MAX_INPUT_TOKENS:-$((MAX_MODEL_LEN - MAX_TOKENS))}
 TRUST_REMOTE_CODE=${TRUST_REMOTE_CODE:-1}
 VLLM_USE_V1=${VLLM_USE_V1:-1}
 WORKER_MULTIPROC_METHOD=${WORKER_MULTIPROC_METHOD:-spawn}
@@ -47,7 +48,7 @@ DISABLE_MM_PREPROCESSOR_CACHE=${DISABLE_MM_PREPROCESSOR_CACHE:-1}
 SKIP_TOKENIZER_INIT=${SKIP_TOKENIZER_INIT:-0}
 
 if [[ -z "$INPUT_JSON" ]]; then
-  echo "INPUT_JSON is required. Point it to a *_eval_estimation_dialogues.json file." >&2
+  echo "INPUT_JSON is required. Point it to a SWE-bench dialogue json such as results_128_v2_dialogues_incremental.json." >&2
   exit 1
 fi
 
@@ -113,6 +114,7 @@ CMD=(
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
   --max-model-len "$MAX_MODEL_LEN"
   --max-num-batched-tokens "$MAX_BATCHED_TOKENS"
+  --max-input-tokens "$MAX_INPUT_TOKENS"
   --trust-remote-code "$TRUST_REMOTE_CODE"
   --vllm-use-v1 "$VLLM_USE_V1"
   --worker-multiproc-method "$WORKER_MULTIPROC_METHOD"
@@ -140,5 +142,6 @@ echo "==> input_json=${INPUT_JSON}"
 echo "==> output_json=${OUTPUT_JSON}"
 echo "==> CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
 echo "==> num_gpus=${NUM_GPUS}, tp_size=${TP_SIZE}"
+echo "==> max_input_tokens=${MAX_INPUT_TOKENS}"
 
 "${CMD[@]}"

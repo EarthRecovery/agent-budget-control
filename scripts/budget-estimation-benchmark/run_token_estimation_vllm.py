@@ -127,6 +127,47 @@ def _render_messages_with_chat_template(tokenizer: Any, messages: List[Dict[str,
         return "\n\n".join(rendered_parts)
 
 
+def _count_tokens(tokenizer: Any, text: str) -> int:
+    return len(tokenizer(text, add_special_tokens=False)["input_ids"])
+
+
+def _trim_messages_to_fit(
+    tokenizer: Any,
+    messages: List[Dict[str, Any]],
+    *,
+    max_input_tokens: int,
+) -> tuple[List[Dict[str, Any]], str, Dict[str, int]]:
+    working_messages = [dict(message) for message in messages]
+    rendered = _render_messages_with_chat_template(tokenizer, working_messages)
+    rendered_tokens = _count_tokens(tokenizer, rendered)
+
+    trim_info = {
+        "max_input_tokens": int(max_input_tokens),
+        "rendered_input_tokens": int(rendered_tokens),
+        "dropped_messages": 0,
+    }
+    if rendered_tokens <= int(max_input_tokens):
+        return working_messages, rendered, trim_info
+
+    removable_indices = list(range(1, max(1, len(working_messages) - 1)))
+    while rendered_tokens > int(max_input_tokens) and removable_indices:
+        drop_index = removable_indices.pop(0)
+        if drop_index >= len(working_messages) - 1:
+            continue
+        del working_messages[drop_index]
+        removable_indices = [
+            idx - 1 if idx > drop_index else idx
+            for idx in removable_indices
+            if idx != drop_index
+        ]
+        trim_info["dropped_messages"] += 1
+        rendered = _render_messages_with_chat_template(tokenizer, working_messages)
+        rendered_tokens = _count_tokens(tokenizer, rendered)
+
+    trim_info["rendered_input_tokens"] = int(rendered_tokens)
+    return working_messages, rendered, trim_info
+
+
 def _usage_from_text(tokenizer: Any, prompt_text: str, response_text: str) -> Dict[str, Any]:
     prompt_tokens = len(tokenizer(prompt_text, add_special_tokens=False)["input_ids"])
     completion_tokens = len(tokenizer(response_text, add_special_tokens=False)["input_ids"])
@@ -169,6 +210,7 @@ def main() -> None:
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.85, help="vLLM gpu_memory_utilization")
     parser.add_argument("--max-model-len", type=int, default=32768, help="vLLM max_model_len")
     parser.add_argument("--max-num-batched-tokens", type=int, default=32768, help="vLLM max_num_batched_tokens")
+    parser.add_argument("--max-input-tokens", type=int, default=None, help="Maximum prompt tokens sent to the estimation model; defaults to max_model_len - max_tokens")
     parser.add_argument("--trust-remote-code", type=_parse_bool_flag, default=True, help="Pass trust_remote_code to vLLM/tokenizer")
     parser.add_argument("--vllm-use-v1", type=int, choices=[0, 1], default=1, help="Set VLLM_USE_V1 before importing vLLM")
     parser.add_argument("--worker-multiproc-method", choices=["fork", "spawn"], default="spawn", help="Set VLLM_WORKER_MULTIPROC_METHOD before importing vLLM")
@@ -256,6 +298,11 @@ def main() -> None:
         max_tokens=int(args.max_tokens),
     )
     model_tag = args.model_tag or os.path.basename(os.path.abspath(args.model_path.rstrip("/")))
+    max_input_tokens = (
+        int(args.max_input_tokens)
+        if args.max_input_tokens is not None
+        else max(1, int(args.max_model_len) - int(args.max_tokens))
+    )
 
     results: List[Dict[str, Any]] = []
     sample_indices = list(range(len(env.samples)))
@@ -271,15 +318,23 @@ def main() -> None:
             prompt_texts: List[str] = []
             prompt_text_by_sample_index: Dict[int, str] = {}
             api_messages_by_sample_index: Dict[int, List[Dict[str, Any]]] = {}
+            original_api_messages_by_sample_index: Dict[int, List[Dict[str, Any]]] = {}
+            trim_info_by_sample_index: Dict[int, Dict[str, int]] = {}
 
             for sample_index in index_chunk:
                 sample = env.get_sample(sample_index)
                 api_messages = env.build_api_messages(sample)
-                prompt_text = _render_messages_with_chat_template(tokenizer, api_messages)
+                trimmed_messages, prompt_text, trim_info = _trim_messages_to_fit(
+                    tokenizer,
+                    api_messages,
+                    max_input_tokens=max_input_tokens,
+                )
                 indexed_samples.append((sample_index, sample))
                 prompt_texts.append(prompt_text)
                 prompt_text_by_sample_index[sample_index] = prompt_text
-                api_messages_by_sample_index[sample_index] = api_messages
+                api_messages_by_sample_index[sample_index] = trimmed_messages
+                original_api_messages_by_sample_index[sample_index] = api_messages
+                trim_info_by_sample_index[sample_index] = trim_info
 
             batch_results: List[Dict[str, Any]] = []
             try:
@@ -356,9 +411,11 @@ def main() -> None:
                         "turn_idx": sample.turn_idx,
                         "source_system": sample.source_system,
                         "input_messages": api_messages,
+                        "untrimmed_input_messages": original_api_messages_by_sample_index[sample_index],
                         "rollout_history_messages": sample.input_messages,
                         "input_text": json.dumps(api_messages, ensure_ascii=False, indent=2),
                         "rendered_prompt_text": prompt_text_by_sample_index[sample_index],
+                        "trim_info": trim_info_by_sample_index[sample_index],
                         "estimation_user_prompt": env.build_user_prompt(sample),
                         "target_output": sample.target_output,
                         "ground_truth": {

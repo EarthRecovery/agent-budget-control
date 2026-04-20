@@ -9,7 +9,7 @@ PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/agent-budget-control"}
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
-MODEL_NAME=${MODEL_NAME:-Claude-Sonnet-4.6-low-thinking}
+MODEL_NAME=${MODEL_NAME:-Claude-Opus-4.7-low-thinking}
 REASONING_EFFORT=${REASONING_EFFORT:-}
 
 case "$MODEL_NAME" in
@@ -76,7 +76,7 @@ case "$PROVIDER" in
     ;;
 esac
 
-RUN_NAME=${RUN_NAME:-warehouse-Claude-Sonnet-4.6-low-thinking_Claude-Sonnet-4.6-low-thinking-main}
+RUN_NAME=${RUN_NAME:-warehouse-Claude-Opus-4.7-low-thinking_Claude-Opus-4.7-low-thinking-main}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/${RUN_NAME}"}
 OUTPUT_JSON=${OUTPUT_JSON:-"$OUTPUT_DIR/${RUN_NAME}.json"}
@@ -160,7 +160,7 @@ else
   COST_BUDGET_RATIO=${COST_BUDGET_RATIO:-1.0}
 fi
 
-DEFAULT_INPUT_JSON="/u/ylin30/database/origin/warehouse-origin-claude-sonnet-4.6-128-main/combined_sonnet4.6-low_128seeds.json"
+DEFAULT_INPUT_JSON="/u/ylin30/database/origin/warehouse-origin-claude-opus-4.7-low-thinking-128-main/combined_opus4.7-low_128seeds.json"
 INPUT_JSON=${INPUT_JSON:-"$DEFAULT_INPUT_JSON"}
 
 if [[ ! -f "$INPUT_JSON" ]]; then

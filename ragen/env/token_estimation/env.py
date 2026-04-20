@@ -101,10 +101,16 @@ def _resolve_turn_user_content(turn: Dict[str, Any]) -> str:
 
 
 def _resolve_turn_assistant_content(turn: Dict[str, Any]) -> str:
+    raw_response = str(turn.get("raw_response") or "").strip()
+    if raw_response:
+        return raw_response
+    raw_generation = str(turn.get("raw_generation") or "").strip()
+    if raw_generation:
+        return raw_generation
     parsed = str(turn.get("parsed_response") or "").strip()
     if parsed:
         return parsed
-    return str(turn.get("raw_response") or "").strip()
+    return ""
 
 
 def _is_context_token_truncated_turn(turn: Dict[str, Any]) -> bool:
@@ -192,6 +198,37 @@ def _usage_details_look_cumulative(
     if comparable == 0:
         return False
     return cumulative_votes * 2 >= comparable
+
+
+def _resolve_rollout_total_tokens(rollout: Dict[str, Any]) -> Optional[int]:
+    value = _safe_int(rollout.get("api_total_tokens"))
+    if value is None:
+        value = _safe_int(rollout.get("total_tokens"))
+    return value
+
+
+def _infer_usage_mode_from_rollout(
+    rollout: Dict[str, Any],
+    raw_details: List[Dict[str, Optional[int]]],
+) -> Optional[bool]:
+    comparable_totals = [
+        int(detail["total_tokens"])
+        for detail in raw_details
+        if detail.get("total_tokens") is not None
+    ]
+    if not comparable_totals:
+        return None
+
+    rollout_total = _resolve_rollout_total_tokens(rollout)
+    if rollout_total is not None:
+        sum_totals = sum(comparable_totals)
+        last_total = comparable_totals[-1]
+        if sum_totals == int(rollout_total):
+            return False
+        if last_total == int(rollout_total) and sum_totals > int(rollout_total):
+            return True
+
+    return None
 
 
 def _normalize_turn_usage_details(
@@ -369,16 +406,10 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
             raw_per_turn_token_usage_details = [
                 _resolve_turn_token_usage_detail(turn) for turn in turns
             ]
-            # These rollout files store per-request token usage for progressively
-            # longer prefixes:
-            #   turn 1 -> tokens for {turn1}
-            #   turn 2 -> tokens for {turn1, turn2}
-            #   turn 3 -> tokens for {turn1, turn2, turn3}
-            #
-            # Direct API usage therefore does not imply "delta" accounting. Let
-            # the normalizer infer whether the sequence is cumulative from the
-            # observed token pattern instead of forcing delta mode.
-            assume_cumulative = None
+            assume_cumulative = _infer_usage_mode_from_rollout(
+                rollout,
+                raw_per_turn_token_usage_details,
+            )
             per_turn_token_usage_details, cumulative_turn_totals, _ = (
                 _normalize_turn_usage_details(
                     raw_per_turn_token_usage_details,
