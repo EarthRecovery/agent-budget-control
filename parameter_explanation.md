@@ -1,5 +1,5 @@
 你需要借助ragen搭建一套estimation 的评测环境
-你的输入是类似于/u/ylin30/database/origin-test/warehouse-origin-gpt5.2instant-5-test/rollout_20260417_220923_seed46.json这样的json文档
+你的输入是类似于${HOME}/database/origin-test/warehouse-origin-gpt5.2instant-5-test/rollout_20260417_220923_seed46.json这样的json文档
 
 接下来你需要创建一个临时文件，文件是一个json, 包含输入和输出
 
@@ -11,27 +11,27 @@
           },
           {
             "role": "user",
-            "content": "\nTurn 1:\nState:\nQuestion: Gary Harrison, began his career in the 1970s and has written over how many major-label recorded songs including several number-one hits, another artist who have recorded his work include Bryan White, an American country music artist?\nAvailable actions: search[<query>], finish[<answer>]\nYou have 10 actions left. Always output: <budget-thinking> [Your budget-related reasoning] </budget-thinking> <turn_estimation> [Your estimated remaining turn count] </turn_estimation> <token_estimation> [Your estimated token count] </token_estimation> <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: 2048 words (tokens).\n"
+            "content": "\nTurn 1:\nState:\nQuestion: [PERSON], began his career in the 1970s and has written over how many major-label recorded songs including several number-one hits, another artist who have recorded his work include [PERSON], an American country music artist?\nAvailable actions: search[<query>], finish[<answer>]\nYou have 10 actions left. Always output: <budget-thinking> [Your budget-related reasoning] </budget-thinking> <turn_estimation> [Your estimated remaining turn count] </turn_estimation> <token_estimation> [Your estimated token count] </token_estimation> <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: 2048 words (tokens).\n"
           },
           {
             "role": "assistant",
-            "content": "<think>Search for Gary Harrison songwriter written over how many major-label recorded songs including number-one hits; verify number.</think><answer>search[Gary Harrison songwriter written over how many major-label recorded songs including several number-one hits]</answer>"
+            "content": "<think>Search for [PERSON] songwriter written over how many major-label recorded songs including number-one hits; verify number.</think><answer>search[[PERSON] songwriter written over how many major-label recorded songs including several number-one hits]</answer>"
           },
           {
             "role": "user",
-            "content": "Reward:\n0.0\n\nTurn 2:\nState:\nSearch results for 'Gary Harrison songwriter written over how many major-label recorded songs including several number-one hits':\nCould not connect to retrieval server at http://127.0.0.1:8000. Is it running?\n\nAvailable actions: search[<query>], finish[<answer>]\nYou have 9 actions left. Always output: <budget-thinking> [Your budget-related reasoning] </budget-thinking> <turn_estimation> [Your estimated remaining turn count] </turn_estimation> <token_estimation> [Your estimated token count] </token_estimation> <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: 2048 words (tokens).\n"
+            "content": "Reward:\n0.0\n\nTurn 2:\nState:\nSearch results for '[PERSON] songwriter written over how many major-label recorded songs including several number-one hits':\nCould not connect to retrieval server at http://127.0.0.1:8000. Is it running?\n\nAvailable actions: search[<query>], finish[<answer>]\nYou have 9 actions left. Always output: <budget-thinking> [Your budget-related reasoning] </budget-thinking> <turn_estimation> [Your estimated remaining turn count] </turn_estimation> <token_estimation> [Your estimated token count] </token_estimation> <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: 2048 words (tokens).\n"
           },
           {
             "role": "assistant",
-            "content": "<think>Try a different query focusing on bio lines (“over X major label cuts”).</think><answer>search[\"Gary Harrison\" \"major-label recorded songs\" over]</answer>"
+            "content": "<think>Try a different query focusing on bio lines (“over X major label cuts”).</think><answer>search[\"[PERSON]\" \"major-label recorded songs\" over]</answer>"
           },
           {
             "role": "user",
-            "content": "Reward:\n0.0\n\nTurn 3:\nState:\nSearch results for '\"Gary Harrison\" \"major-label recorded songs\" over':\nCould not connect to retrieval server at http://127.0.0.1:8000. Is it running?\n\nAvailable actions: search[<query>], finish[<answer>]\nYou have 8 actions left. Always output: <budget-thinking> [Your budget-related reasoning] </budget-thinking> <turn_estimation> [Your estimated remaining turn count] </turn_estimation> <token_estimation> [Your estimated token count] </token_estimation> <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: 2048 words (tokens).\n"
+            "content": "Reward:\n0.0\n\nTurn 3:\nState:\nSearch results for '\"[PERSON]\" \"major-label recorded songs\" over':\nCould not connect to retrieval server at http://127.0.0.1:8000. Is it running?\n\nAvailable actions: search[<query>], finish[<answer>]\nYou have 8 actions left. Always output: <budget-thinking> [Your budget-related reasoning] </budget-thinking> <turn_estimation> [Your estimated remaining turn count] </turn_estimation> <token_estimation> [Your estimated token count] </token_estimation> <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: 2048 words (tokens).\n"
           },
           {
             "role": "assistant",
-            "content": "<think>Try one more query variant that may hit cached snippet; if still down, will finish with best-known value.</think><answer>search[Gary Harrison songwriter over 200 major label recorded songs]</answer>"
+            "content": "<think>Try one more query variant that may hit cached snippet; if still down, will finish with best-known value.</think><answer>search[[PERSON] songwriter over 200 major label recorded songs]</answer>"
           },
 
 简化为：
@@ -128,6 +128,6 @@ or
 
 接下来处理程序需要处理这些输出，计算和实际的偏差值，将结果汇总到一个json文件里面
 
-在prompt 中的所有语言都应该是英文，你需要根据/u/ylin30/database/origin-test/warehouse-origin-gpt5.2instant-5-test/rollout_20260417_220923_seed46.json 里面的记录选择合适的翻译
+在prompt 中的所有语言都应该是英文，你需要根据${HOME}/database/origin-test/warehouse-origin-gpt5.2instant-5-test/rollout_20260417_220923_seed46.json 里面的记录选择合适的翻译
 
-你需要把这些整理为一个环境：money_estimation. 很多逻辑和/u/ylin30/agent-budget-control/ragen/env/token_estimation 很像，你可以参照着来。做完以后你需要在/u/ylin30/agent-budget-control/scripts/evaluation-scripts/eval 下面写一个warehouse.sh
+你需要把这些整理为一个环境：money_estimation. 很多逻辑和${HOME}/agent-budget-control/ragen/env/token_estimation 很像，你可以参照着来。做完以后你需要在${HOME}/agent-budget-control/scripts/evaluation-scripts/eval 下面写一个warehouse.sh

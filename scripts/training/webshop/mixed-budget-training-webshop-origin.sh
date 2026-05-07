@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 cd "$REPO_ROOT"
 
 # The vendored VERL repo is laid out as <repo>/verl/verl, so add <repo>/verl
@@ -47,7 +47,7 @@ PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/training/mixed-budget-training-webshop-origin.sh [options]
+Usage: bash scripts/training/webshop/mixed-budget-training-webshop-origin.sh [options]
 
 Plain WebShop RL only:
   - mixed turn budget: disabled

@@ -138,4 +138,4 @@ if __name__ == "__main__":
 # Example:
 # export OPENROUTER_API_KEY=...
 # export RUN_OPENROUTER_LIVE_TESTS=1
-# conda run -n ragenv2 pytest -q -s /u/ylin30/agent-budget-control/tests/llm_agent/test_openrouter_deepseek_v32_thinking.py
+# conda run -n ragenv2 pytest -q -s ${HOME}/agent-budget-control/tests/llm_agent/test_openrouter_deepseek_v32_thinking.py

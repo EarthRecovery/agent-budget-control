@@ -1,4 +1,4 @@
-# these code are adapted from the gym_sokoban repo at https://github.com/mpSchrader/gym-sokoban
+# Adapted from the gym_sokoban repository.
 import random
 import numpy as np
 import marshal

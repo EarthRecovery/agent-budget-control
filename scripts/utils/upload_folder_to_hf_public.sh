@@ -44,7 +44,7 @@ Examples:
   bash scripts/utils/upload_folder_to_hf_public.sh \
     hf_xxx \
     /path/to/hf_merged \
-    ylin30/webshop-mixed-step100
+    username/webshop-mixed-step100
 EOF
 }
 

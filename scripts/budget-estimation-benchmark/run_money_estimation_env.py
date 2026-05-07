@@ -244,7 +244,10 @@ def main() -> None:
     model_name_lower = str(args.model).lower()
     provider_lower = str(args.provider).lower()
     if provider_lower == "anthropic" and (
-        model_name_lower.startswith("claude-opus-4") or model_name_lower.startswith("claude-sonnet-4")
+        model_name_lower.startswith("claude-opus-4")
+        or model_name_lower.startswith("claude-opus-5")
+        or model_name_lower.startswith("claude-sonnet-4")
+        or model_name_lower.startswith("claude-sonnet-5")
     ):
         generate_kwargs.pop("temperature", None)
         if args.thinking_adaptive:

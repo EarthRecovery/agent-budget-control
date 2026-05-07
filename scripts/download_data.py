@@ -3,7 +3,7 @@
 import os
 from huggingface_hub import snapshot_download
 
-def download_datasets(repo_id="ZihanWang314/ragen-datasets", local_dir="data"):
+def download_datasets(repo_id="", local_dir="data"):
     """
     Download all datasets from Hugging Face Hub to local directory.
     
@@ -13,9 +13,10 @@ def download_datasets(repo_id="ZihanWang314/ragen-datasets", local_dir="data"):
     """
     print(f"Downloading datasets from {repo_id}...")
 
-    url = "https://huggingface.co/datasets/Jiayi-Pan/Countdown-Tasks-3to4/resolve/main/data/train-00000-of-00001.parquet"
-    os.makedirs("data/countdown", exist_ok=True)
-    os.system(f"wget {url} -O data/countdown/train.parquet")
+    countdown_data_url = os.environ.get("COUNTDOWN_DATA_URL", "")
+    if countdown_data_url:
+        os.makedirs("data/countdown", exist_ok=True)
+        os.system(f"wget {countdown_data_url} -O data/countdown/train.parquet")
     
     # Create the data directory if it doesn't exist
     os.makedirs(local_dir, exist_ok=True)

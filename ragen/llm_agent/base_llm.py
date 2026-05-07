@@ -181,10 +181,85 @@ class OpenAIProvider(LLMProvider):
 
     def _normalize_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         normalized = dict(kwargs)
-        needs_max_completion_tokens = self.model_name.startswith("gpt-5") or self.model_name.startswith("o")
-        if needs_max_completion_tokens and "max_tokens" in normalized and "max_completion_tokens" not in normalized:
-            normalized["max_completion_tokens"] = normalized.pop("max_tokens")
+        if self._uses_responses_api():
+            if "max_completion_tokens" in normalized and "max_output_tokens" not in normalized:
+                normalized["max_output_tokens"] = normalized.pop("max_completion_tokens")
+            if "max_tokens" in normalized and "max_output_tokens" not in normalized:
+                normalized["max_output_tokens"] = normalized.pop("max_tokens")
+            reasoning_effort = normalized.pop("reasoning_effort", None)
+            if reasoning_effort is not None and "reasoning" not in normalized:
+                normalized["reasoning"] = {"effort": str(reasoning_effort)}
+        else:
+            needs_max_completion_tokens = self.model_name.startswith("gpt-5") or self.model_name.startswith("o")
+            if needs_max_completion_tokens and "max_tokens" in normalized and "max_completion_tokens" not in normalized:
+                normalized["max_completion_tokens"] = normalized.pop("max_tokens")
         return normalized
+
+    def _uses_responses_api(self) -> bool:
+        normalized = self.model_name.strip().lower()
+        return "codex" in normalized
+
+    def _normalize_response_input_content(self, content: Any) -> Any:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            normalized_blocks: List[Dict[str, Any]] = []
+            for block in content:
+                if isinstance(block, dict):
+                    normalized_block = dict(block)
+                    block_type = normalized_block.get("type")
+                    if block_type == "text":
+                        normalized_block["type"] = "input_text"
+                    normalized_blocks.append(normalized_block)
+                elif block is not None:
+                    normalized_blocks.append({"type": "input_text", "text": str(block)})
+            return normalized_blocks
+        if isinstance(content, dict):
+            normalized_block = dict(content)
+            if normalized_block.get("type") == "text":
+                normalized_block["type"] = "input_text"
+            return [normalized_block]
+        if content is None:
+            return ""
+        return str(content)
+
+    def _messages_to_responses_input(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        normalized_messages: List[Dict[str, Any]] = []
+        for message in messages:
+            normalized_messages.append(
+                {
+                    "role": message.get("role", "user"),
+                    "content": self._normalize_response_input_content(message.get("content")),
+                }
+            )
+        return normalized_messages
+
+    def _extract_response_text(self, response: Any) -> str:
+        output_text = getattr(response, "output_text", None)
+        if isinstance(output_text, str):
+            return output_text
+
+        output_items = getattr(response, "output", None) or []
+        collected: List[str] = []
+        for item in output_items:
+            item_type = getattr(item, "type", None)
+            item_content = getattr(item, "content", None)
+            if item_type is None and isinstance(item, dict):
+                item_type = item.get("type")
+                item_content = item.get("content")
+            if item_type != "message" or not item_content:
+                continue
+            for block in item_content:
+                block_type = getattr(block, "type", None)
+                block_text = getattr(block, "text", None)
+                if block_type is None and isinstance(block, dict):
+                    block_type = block.get("type")
+                    block_text = block.get("text")
+                if block_type == "output_text" and block_text is not None:
+                    collected.append(str(block_text))
+        if collected:
+            return "".join(collected)
+        raise ValueError("Responses API response did not include output_text")
 
     def _normalize_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         normalized = [dict(message) for message in messages]
@@ -200,15 +275,33 @@ class OpenAIProvider(LLMProvider):
         kwargs = self._normalize_kwargs(kwargs)
         messages = self._normalize_messages(messages)
 
-        response = await self._get_client().chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            **kwargs
-        )
-        if response.choices[0].finish_reason in ['length', 'content_filter']:
+        if self._uses_responses_api():
+            response = await self._get_client().responses.create(
+                model=self.model_name,
+                input=self._messages_to_responses_input(messages),
+                **kwargs
+            )
+            status = getattr(response, "status", None)
+            incomplete_details = getattr(response, "incomplete_details", None)
+            incomplete_reason = getattr(incomplete_details, "reason", None)
+            if incomplete_reason is None and isinstance(incomplete_details, dict):
+                incomplete_reason = incomplete_details.get("reason")
+            if status == "incomplete" and incomplete_reason == "max_output_tokens":
+                raise ValueError("Content filtered or length exceeded")
+            content = self._extract_response_text(response)
+        else:
+            response = await self._get_client().chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                **kwargs
+            )
+            finish_reason = getattr(response.choices[0], "finish_reason", None)
+            content = response.choices[0].message.content
+
+        if not self._uses_responses_api() and finish_reason in ['length', 'content_filter']:
             raise ValueError("Content filtered or length exceeded")
         return LLMResponse(
-            content=response.choices[0].message.content,
+            content=content,
             model_name=response.model,
             provider_name=self.provider_name,
             usage=_normalize_usage(getattr(response, "usage", None)),
@@ -536,8 +629,13 @@ class AnthropicProvider(LLMProvider):
         else:
             self_prompt_cache_enabled = self.prompt_cache_enabled
         normalized["_anthropic_prompt_cache_enabled"] = self_prompt_cache_enabled
-        # New Claude 4.x models reject/deprecate the temperature parameter.
-        if self.model_name.startswith("claude-opus-4") or self.model_name.startswith("claude-sonnet-4"):
+        # New Claude 4.x/5.x models reject/deprecate the temperature parameter.
+        if (
+            self.model_name.startswith("claude-opus-4")
+            or self.model_name.startswith("claude-opus-5")
+            or self.model_name.startswith("claude-sonnet-4")
+            or self.model_name.startswith("claude-sonnet-5")
+        ):
             normalized.pop("temperature", None)
         thinking = normalized.get("thinking")
         if thinking is not None:

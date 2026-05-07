@@ -30,7 +30,7 @@ Environment variables:
 
 Examples:
   bash scripts/utils/download_model_from_hf.sh \
-    ylin30/webshop-mixed-step100 \
+    username/webshop-mixed-step100 \
     /projects/bflz/downloaded_models/webshop-mixed-step100
 
   bash scripts/utils/download_model_from_hf.sh \

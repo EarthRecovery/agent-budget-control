@@ -1,6 +1,5 @@
 """
 This is the environment state manager for the LLM agent.
-author: Pingyue Zhang
 date: 2025-03-30
 """
 import atexit

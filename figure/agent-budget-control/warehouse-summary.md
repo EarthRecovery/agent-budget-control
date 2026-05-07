@@ -1,6 +1,6 @@
 # Warehouse Estimation Summary
 
-本文汇总 `/u/ylin30/database/origin-test/warehouse-origin-gpt5.2instant-5-test/combined_rollouts.json` 和 `/u/ylin30/database/estimation-test/warehouse-OpenAI-5.2-Instant-5-test/warehouse-OpenAI-5.2-Instant-5-test.json` 生成的 warehouse 图，并说明 estimation 阶段是怎么问模型的、模型看到了哪些信息。
+本文汇总 `${HOME}/database/origin-test/warehouse-origin-gpt5.2instant-5-test/combined_rollouts.json` 和 `${HOME}/database/estimation-test/warehouse-OpenAI-5.2-Instant-5-test/warehouse-OpenAI-5.2-Instant-5-test.json` 生成的 warehouse 图，并说明 estimation 阶段是怎么问模型的、模型看到了哪些信息。
 
 ## 数据与设置
 
@@ -15,7 +15,7 @@
 - 整体 feasibility accuracy：0.700
 - Mean reward：0.500
 
-图都放在 [warehouse-5-test](/u/ylin30/figure/agent-budget-control/warehouse-5-test)。
+图都放在 [warehouse-5-test](${HOME}/figure/agent-budget-control/warehouse-5-test)。
 
 ## 主要图
 
@@ -105,8 +105,8 @@ reward 来自 money estimation env 的打分逻辑：
 
 对应 prompt 文件：
 
-- [warehouse_estimation_system.txt](/u/ylin30/agent-budget-control/scripts/evaluation-scripts/eval/prompts/warehouse_estimation_system.txt)
-- [warehouse_estimation_user.txt](/u/ylin30/agent-budget-control/scripts/evaluation-scripts/eval/prompts/warehouse_estimation_user.txt)
+- [warehouse_estimation_system.txt](${HOME}/agent-budget-control/scripts/evaluation-scripts/eval/prompts/warehouse_estimation_system.txt)
+- [warehouse_estimation_user.txt](${HOME}/agent-budget-control/scripts/evaluation-scripts/eval/prompts/warehouse_estimation_user.txt)
 
 ### System prompt
 
@@ -233,7 +233,7 @@ or
 
 ## 相关文件
 
-- 文档汇总：[warehouse-summary.md](/u/ylin30/figure/agent-budget-control/warehouse-summary.md)
-- 图和自动生成摘要：[warehouse-5-test](/u/ylin30/figure/agent-budget-control/warehouse-5-test)
-- 自动作图脚本：[make_figures.py](/u/ylin30/figure/agent-budget-control/warehouse-5-test/make_figures.py)
-- 自动摘要：[summary.md](/u/ylin30/figure/agent-budget-control/warehouse-5-test/summary.md)
+- 文档汇总：[warehouse-summary.md](${HOME}/figure/agent-budget-control/warehouse-summary.md)
+- 图和自动生成摘要：[warehouse-5-test](${HOME}/figure/agent-budget-control/warehouse-5-test)
+- 自动作图脚本：[make_figures.py](${HOME}/figure/agent-budget-control/warehouse-5-test/make_figures.py)
+- 自动摘要：[summary.md](${HOME}/figure/agent-budget-control/warehouse-5-test/summary.md)

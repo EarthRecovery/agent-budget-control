@@ -6,8 +6,8 @@ with open('requirements.txt') as f:
 setup(
     name='robotouille',
     version='1.0',
-    author='Gonzalo Gonzalez',
-    author_email='gg387@cornell.edu',
+    author='',
+    author_email='',
     description='A challenging benchmark for testing LLM agent planning capabilities!',
     packages=find_packages(),
     install_requires=requirements,

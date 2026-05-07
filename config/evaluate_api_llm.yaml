@@ -47,6 +47,12 @@ model_info:
     generation_kwargs:
       max_completion_tokens: 512
       reasoning_effort: high
+  OpenAI-5.2-Codex-low-thinking:
+    provider_name: openai
+    model_name: gpt-5.2-codex
+    generation_kwargs:
+      max_completion_tokens: 800
+      reasoning_effort: low
   OpenRouter-Qwen3.6-Plus:
     provider_name: openrouter
     model_name: qwen/qwen3.6-plus
@@ -100,6 +106,13 @@ model_info:
   Claude-Opus-4.7-low-thinking:
     provider_name: anthropic
     model_name: claude-opus-4-7
+    generation_kwargs:
+      max_tokens: 800
+      output_config:
+        effort: low
+  Claude-Opus-4.6-low-thinking:
+    provider_name: anthropic
+    model_name: claude-opus-4-6
     generation_kwargs:
       max_tokens: 800
       output_config:

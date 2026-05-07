@@ -161,6 +161,63 @@ def test_openai_provider_rebuilds_async_client_when_event_loop_changes(monkeypat
     assert first_client != second_client
 
 
+def test_openai_codex_uses_responses_api(monkeypatch):
+    captured_calls = []
+
+    class FakeResponses:
+        async def create(self, **kwargs):
+            captured_calls.append(kwargs)
+            block = type("Block", (), {"type": "output_text", "text": "codex ok"})()
+            item = type("Item", (), {"type": "message", "content": [block]})()
+            return type(
+                "Response",
+                (),
+                {
+                    "status": "completed",
+                    "output_text": "codex ok",
+                    "output": [item],
+                    "model": kwargs["model"],
+                    "usage": None,
+                    "id": "req_codex",
+                },
+            )()
+
+    class FailingChatCompletions:
+        async def create(self, **_kwargs):
+            raise AssertionError("chat.completions should not be used for codex models")
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = type("FakeChat", (), {"completions": FailingChatCompletions()})()
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr(base_llm, "AsyncOpenAI", FakeAsyncOpenAI)
+    provider = base_llm.OpenAIProvider(model_name="gpt-5.2-codex", api_key="test-key")
+
+    response = asyncio.run(
+        provider.generate(
+            [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "solve this"},
+            ],
+            max_completion_tokens=321,
+            reasoning_effort="low",
+        )
+    )
+
+    assert response.content == "codex ok"
+    assert len(captured_calls) == 1
+    request = captured_calls[0]
+    assert request["model"] == "gpt-5.2-codex"
+    assert request["max_output_tokens"] == 321
+    assert "max_completion_tokens" not in request
+    assert request["reasoning"] == {"effort": "low"}
+    assert request["input"][0]["role"] == "developer"
+    assert request["input"][0]["content"] == "system prompt"
+    assert request["input"][1]["role"] == "user"
+    assert request["input"][1]["content"] == "solve this"
+
+
 def test_openrouter_gemini_moves_cache_control_into_last_message_block(monkeypatch):
     captured_calls = []
 

@@ -1,6 +1,6 @@
 Based on the provided SearchQA rollout context, you are given the following:
 1. You have completed {completed_turns} turns.
-2. Each turn, your token consumption is {turn_token_usage_text}.
+2. Per-turn token usage so far, excluding reused history from earlier turns, is: {turn_token_usage_text}.
 3. You need to finish the task within {max_context_window_tokens} total tokens.
 
 Now, estimate:
@@ -19,6 +19,8 @@ You will receive:
 turn_token_usage_text: Turn 1: input X1 tokens, output Y1 tokens
 You should estimate:
 X2 + Y2 + X3 + Y3
+
+Here, one turn means one user message plus one assistant response, and does not include tokens from earlier turns that are only replayed as history.
 
 Output exactly one of the following:
 <think> [Your thoughts, typically 2 sentences,less than 100 tokens] </think><answer>[est_low, est_high]</answer>

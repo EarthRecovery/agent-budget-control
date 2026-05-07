@@ -16,5 +16,5 @@
 - Cost coverage rate (strict): 0.380
 - All-interval coverage rate (strict): 0.280
 
-- Rollout source: `/u/ylin30/database/origin-test/warehouse-origin-gpt5.2instant-5-test/combined_rollouts.json`
-- Estimation source: `/u/ylin30/database/estimation-test/warehouse-OpenAI-5.2-Instant-5-test/warehouse-OpenAI-5.2-Instant-5-test.json`
+- Rollout source: `${HOME}/database/origin-test/warehouse-origin-gpt5.2instant-5-test/combined_rollouts.json`
+- Estimation source: `${HOME}/database/estimation-test/warehouse-OpenAI-5.2-Instant-5-test/warehouse-OpenAI-5.2-Instant-5-test.json`

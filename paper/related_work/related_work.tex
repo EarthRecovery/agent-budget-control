@@ -1,0 +1,55 @@
+% LaTeX version of paper/related_work/related_work.md
+% Intended to be included via \input{} in a larger manuscript.
+
+\section{Related Work}
+\label{sec:related-work}
+
+\paragraph{Cost-constrained decision making and budgeted agents.}
+Prior work on constrained and budgeted sequential decision making has mostly treated cost as an exogenous object: safe RL, CMDP, and budgeted-RL methods optimize reward subject to safety or resource constraints, with the cost function specified by the environment, estimated as part of the environment model, or certified during exploration \cite{achiam2017constrained,tessler2019reward,carrara2019budgeted,wachi2020safe,zheng2020constrained,liu2022constrainedvariational,li2023nearoptimal,mazumdar2024safe}. A more recent line brings budget explicitly into agentic LLM systems by introducing token, tool-use, or monetary limits, budget-aware planning, and cost-aware exploration \cite{zhou2026adaptive,liu2026budgetconstrained,ding2026calibratethenact,mccleary2026quantifying}. These works move closer to deployment concerns, but they still study how to act under a fixed or externally imposed budget, rather than whether the agent can estimate the budget it will still need from its current state. Our setting is related but distinct: instead of optimizing under an externally specified budget model, we ask whether the agent can estimate its own remaining budget need online, where future cost is endogenous because it depends on the agent's subsequent reasoning, tool calls, retries, and recovery behavior.
+
+\paragraph{Prediction intervals, calibration, and uncertainty-aware estimation.}
+Prediction-interval and calibration work provides the closest methodological precedent because it studies finite-sample coverage, interval sharpness, conformal validity, and post-hoc calibration for uncertainty-aware prediction \cite{lei2018distributionfree,pearce2018highquality,kuleshov2018accurate,romano2019conformalized,amini2020deep,chung2021beyond,levi2022evaluating}. These methods, however, are developed for fixed predictors on static supervised data, where the target distribution is not changed by the predictor's own future behavior \cite{lei2018distributionfree,romano2019conformalized,levi2022evaluating}. In our setting, by contrast, the remaining-cost distribution evolves along the trajectory and is partly induced by the agent's own future actions. Our task is therefore closer to online belief tracking than to standard offline calibration, even though we inherit the language of coverage and tightness from this literature.
+
+\paragraph{Adaptive compute, stopping, and test-time scaling.}
+Another nearby line studies how much computation should be allocated to each input. Classic adaptive-compute, early-exit, and dynamic-routing methods decide when to stop or skip computation for efficiency \cite{graves2016adaptive,teerapittayanon2016branchynet,wang2018skipnet,kaya2019shallowdeep,chen2020learningtostop,zeng2023learningtoskip}, while more recent LLM work studies test-time compute scaling and multi-turn stopping under token budgets \cite{zhou2026adaptive,snell2025scaling,muennighoff2025s1}. The common goal in this line is to improve performance given a budget, reduce wasted computation, or terminate reasoning when additional compute is no longer useful. Our question is different: not how to spend a fixed compute budget optimally, but whether the agent knows how much additional budget it will need from its current trajectory state, and how uncertain that estimate is.
+
+\paragraph{Self-monitoring, failure awareness, and trajectory-centric agents.}
+Work on LLM self-evaluation and uncertainty elicitation studies whether models can estimate answer correctness, verbalize confidence, or recognize when they do not know \cite{kadavath2022language,xiong2024can,kapoor2024large,yona2024can,deng2024towards,manakul2023selfcheckgpt}. A related line uses reflection, self-feedback, and tool-mediated critique to improve downstream behavior once such signals are surfaced \cite{madaan2023selfrefine,shinn2023reflexion,gou2024critic,liu2024intrinsicselfcorrection,hu2024uncertainty,wang2024devils}. Recent work on negative trajectories and failure diagnosis further shifts attention from final task success to where and why agents fail along a trajectory \cite{wang2024learningfromfailure,barke2026agentrx}. At the environment level, interactive agent benchmarks and progress-monitoring methods establish the long-horizon settings where such intermediate signals matter \cite{yao2023react,yao2022webshop,zhou2023webarena,liu2024agentbench,shridhar2021alfworld,ma2019selfmonitoring,ma2019theregretful}. Yet these works typically target correctness, repair, diagnosis, or progress, rather than whether an agent can forecast its remaining token or financial budget. Our work instead treats budget awareness as a first-class deployability capability and shows that the dominant failure mode is selective over-optimism on failed trajectories, precisely where early budget warning is most needed.
+
+\begin{figure*}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{|p{0.22\textwidth}|c|c|c|c|c|c|c|c|}
+\hline
+Similar Work &
+\begin{tabular}{@{}c@{}}Agentic\\setting\end{tabular} &
+\begin{tabular}{@{}c@{}}Trajectory-\\level\end{tabular} &
+\begin{tabular}{@{}c@{}}Online during\\execution\end{tabular} &
+\begin{tabular}{@{}c@{}}Interval /\\calibrated UQ\end{tabular} &
+\begin{tabular}{@{}c@{}}Token\\budget\end{tabular} &
+\begin{tabular}{@{}c@{}}Financial\\budget\end{tabular} &
+\begin{tabular}{@{}c@{}}Endogenous\\future cost\end{tabular} &
+\begin{tabular}{@{}c@{}}Failure-specific\\analysis\end{tabular} \\
+\hline
+Can LLMs Express Their Uncertainty?~\cite{xiong2024can} & \texttt{N} & \texttt{N} & \texttt{N} & \texttt{P} & \texttt{N} & \texttt{N} & \texttt{N} & \texttt{P} \\
+\hline
+Conformalized Quantile Regression~\cite{romano2019conformalized} & \texttt{N} & \texttt{N} & \texttt{N} & \texttt{Y} & \texttt{N} & \texttt{N} & \texttt{N} & \texttt{N} \\
+\hline
+Adaptive Stopping for Multi-Turn LLM Reasoning~\cite{zhou2026adaptive} & \texttt{P} & \texttt{Y} & \texttt{Y} & \texttt{Y} & \texttt{P} & \texttt{N} & \texttt{P} & \texttt{N} \\
+\hline
+Budget-Constrained Agentic LLMs (INTENT)~\cite{liu2026budgetconstrained} & \texttt{Y} & \texttt{Y} & \texttt{Y} & \texttt{N} & \texttt{P} & \texttt{Y} & \texttt{Y} & \texttt{N} \\
+\hline
+Calibrate-Then-Act~\cite{ding2026calibratethenact} & \texttt{Y} & \texttt{Y} & \texttt{Y} & \texttt{N} & \texttt{N} & \texttt{N} & \texttt{P} & \texttt{N} \\
+\hline
+Budget-Constrained Agentic Search (BCAS)~\cite{mccleary2026quantifying} & \texttt{Y} & \texttt{Y} & \texttt{Y} & \texttt{N} & \texttt{Y} & \texttt{N} & \texttt{P} & \texttt{N} \\
+\hline
+Our work & \texttt{Y} & \texttt{Y} & \texttt{Y} & \texttt{Y} & \texttt{Y} & \texttt{Y} & \texttt{Y} & \texttt{Y} \\
+\hline
+\end{tabular}
+\caption{Delta map between our formulation and the closest prior work. Rows are representative neighboring papers; columns are the main components of the problem definition. \texttt{Y} means the component is directly modeled, \texttt{P} means partially related, and \texttt{N} means largely absent.}
+\label{fig:related-work-delta-map}
+\end{figure*}
+
+The central gap highlighted by Figure~\ref{fig:related-work-delta-map} is that prior work typically covers only one or two sides of the space at a time: constrained-agent papers model budget-aware acting but not calibrated remaining-cost intervals; interval-prediction papers model coverage and sharpness but not agentic, trajectory-dependent, endogenous costs; and LLM self-monitoring papers study uncertainty or failure awareness but not token-plus-financial remaining-budget estimation. Our work is positioned at the intersection of these dimensions and formulates trajectory-level online remaining-budget interval estimation as a distinct capability of deployable foundation-model agents.

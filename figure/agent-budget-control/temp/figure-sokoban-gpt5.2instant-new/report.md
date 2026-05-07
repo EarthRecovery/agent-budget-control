@@ -3,9 +3,9 @@
 ## 实验设置
 
 - Rollout 数据：
-  `/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main-new/sokoban_api_eval_estimation_eval_estimation_dialogues.json`
+  `${HOME}/database/origin/sokoban-origin-gpt5.2-instant-128-main-new/sokoban_api_eval_estimation_eval_estimation_dialogues.json`
 - Estimation 数据：
-  `/u/ylin30/database/estimation/sokoban-origin-gpt5.2-instant-128-main-new_gpt5.2-instant-token-estimation-test/sokoban-origin-gpt5.2-instant-128-main-new_gpt5.2-instant-token-estimation-test.json`
+  `${HOME}/database/estimation/sokoban-origin-gpt5.2-instant-128-main-new_gpt5.2-instant-token-estimation-test/sokoban-origin-gpt5.2-instant-128-main-new_gpt5.2-instant-token-estimation-test.json`
 - 预算定义：
   `max_context_window_tokens = 2500`
 - 当前 estimation task 的目标：

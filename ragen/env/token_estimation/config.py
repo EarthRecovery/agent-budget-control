@@ -10,7 +10,7 @@ DEFAULT_SYSTEM_PROMPT_TEMPLATE = """You are an evaluation agent. Based on the pr
 DEFAULT_USER_PROMPT_TEMPLATE = """
 Based on the provided rollout context, you are provided below information:
 1. You have completed {completed_turns} turns.
-2. Each turn, your token consumption is {turn_token_usage_text}.
+2. Per-turn token usage so far, excluding reused history from earlier turns, is: {turn_token_usage_text}.
 3. You need to finish the task within {max_context_window_tokens} tokens.
 
 Now, estimate:
@@ -30,6 +30,8 @@ turn_token_usage_text: Turn 1: input X1 tokens, output Y1 tokens
 You should estimate:
 X2 + Y2 + X3 + Y3
 
+Here, one turn means one user message plus one assistant response, and does not include tokens from earlier turns that are only replayed as history.
+
 Output exactly one of the following:
 <think>[YOUR THINKING]</think><answer>[est_low, est_high]</answer>
 or
@@ -43,4 +45,4 @@ class TokenEstimationEnvConfig:
     include_source_system: bool = True
     system_prompt_template: str = field(default=DEFAULT_SYSTEM_PROMPT_TEMPLATE)
     user_prompt_template: str = field(default=DEFAULT_USER_PROMPT_TEMPLATE)
-    turn_usage_mode: str = "request"
+    turn_usage_mode: str = "turn_excluding_history"

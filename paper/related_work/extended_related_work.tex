@@ -1,0 +1,77 @@
+% LaTeX version of the appendix portion of paper/related_work/related_work.md
+% Intended to be included via \input{} after \appendix in a larger manuscript.
+
+\section{Extended Related Work}
+\label{sec:extended-related-work}
+
+\paragraph{Cost-constrained decision making and endogenous cost.}
+Prior work on constrained and budgeted sequential decision making studies how to optimize behavior under externally specified costs or safety constraints, typically assuming that the cost function is given by the environment, can be learned as part of the environment model, or can be certified during exploration, rather than asking whether the agent itself can estimate its remaining resource need online \cite{achiam2017constrained,tessler2019reward,carrara2019budgeted,wachi2020safe,zheng2020constrained,liu2022constrainedvariational,li2023nearoptimal,mazumdar2024safe}. More recent LLM-agent work moves closer to our setting by introducing explicit token, tool-use, or monetary constraints, online stopping rules, and cost-aware exploration, but its primary goal is still to improve acting under a fixed budget or to enforce budget feasibility, not to evaluate whether an agent can produce a calibrated belief over the budget it will still need to finish the task \cite{zhou2026adaptive,liu2026budgetconstrained,ding2026calibratethenact,mccleary2026quantifying}. In contrast, our work treats budget estimation itself as the task: the agent must continuously predict a remaining-budget interval along the trajectory, where future cost is endogenous because it is partly induced by the agent's own reasoning, tool calls, retries, and recovery behavior.
+
+\paragraph{Prediction intervals and calibration for uncertainty-aware estimation.}
+Prediction-interval and calibration work provides the closest methodological precedent for our formulation because it explicitly studies coverage, sharpness, conformal validity, and post-hoc calibration, but these methods are developed for fixed predictors on static supervised data rather than for agents whose future actions reshape the downstream cost distribution \cite{lei2018distributionfree,pearce2018highquality,kuleshov2018accurate,romano2019conformalized,amini2020deep,chung2021beyond,levi2022evaluating}. This distinction matters because in our setting the target is not a stationary regression label: the remaining cost distribution changes with the agent's own behavior, so the challenge is not only to calibrate an uncertainty estimate, but to do so online as the trajectory unfolds. Our evaluation therefore inherits the language of coverage and tightness from this literature, while extending it to long-horizon interactive rollouts and separating successful from failed trajectories.
+
+\paragraph{Adaptive compute, stopping, and token-budgeted reasoning.}
+A related line on adaptive compute and stopping decides how much inference to allocate to an input or when to terminate reasoning, early-exit, or layer execution, which is highly relevant to our token-budget motivation but still optimizes performance given budget rather than estimating budget need itself \cite{zhou2026adaptive,graves2016adaptive,teerapittayanon2016branchynet,wang2018skipnet,kaya2019shallowdeep,chen2020learningtostop,zeng2023learningtoskip,snell2025scaling,muennighoff2025s1}. These methods show that compute should be distributed non-uniformly across inputs, and some of the recent LLM work even makes token budget or stopping policy explicit, but the output remains a control decision rather than a calibrated interval over future cost. Our work differs from this line by asking whether an agent knows how much more budget it will need, not merely whether it can spend a fixed budget more effectively.
+
+\paragraph{Self-evaluation and uncertainty elicitation in LLMs.}
+Work on self-evaluation and uncertainty elicitation shows that language models can sometimes estimate whether an answer is likely to be correct, whether they know the answer, or whether uncertainty should be verbalized, while reflection, self-correction, and tool-mediated critique can improve downstream behavior once such signals are surfaced \cite{kadavath2022language,xiong2024can,kapoor2024large,yona2024can,deng2024towards,manakul2023selfcheckgpt,madaan2023selfrefine,shinn2023reflexion,gou2024critic,liu2024intrinsicselfcorrection,hu2024uncertainty,wang2024devils}. These papers are highly relevant to our motivation because they suggest that foundation-model agents do possess partial metacognitive signals, but the target variable is usually answer correctness, information gain, or action repair rather than remaining cost. Our formulation reuses the same high-level intuition, but shifts the object of uncertainty from correctness to future resource need, and from single-shot answers to trajectory-level execution.
+
+\paragraph{Failure diagnosis, negative trajectories, and selective overconfidence.}
+Recent work on failed trajectories shifts attention from final success labels to trajectory-level failure diagnosis, root-cause attribution, or learning from negative rollouts \cite{wang2024learningfromfailure,barke2026agentrx}. This line is closely related to our motivation because it recognizes that failure is a trajectory-level phenomenon rather than a final binary outcome. However, it remains largely retrospective: it asks where the agent failed or how failed traces can improve training, rather than whether the agent could have known earlier that the remaining budget was insufficient. Our central empirical claim is therefore different: current agents do not fail uniformly at budget estimation, but selectively fail on the very trajectories where early warning is most valuable, producing overly optimistic intervals on failed rollouts until late in execution.
+
+\paragraph{Agent benchmarks and trajectory-level self-monitoring.}
+Interactive agent benchmarks establish the long-horizon, tool-mediated settings in which our problem becomes meaningful, since they require reasoning, acting, replanning, and memory over trajectories whose cost accumulates across turns rather than in a single forward pass \cite{yao2023react,yao2022webshop,zhou2023webarena,liu2024agentbench,shridhar2021alfworld}. Closest in spirit are trajectory-level progress-monitoring methods, which use an auxiliary estimate of task progress to guide search, backtracking, and action choice, thereby showing that intermediate self-monitoring variables can materially improve multi-step control even when they are not the final task objective \cite{ma2019selfmonitoring,ma2019theregretful}. However, prior benchmarks and progress-estimation methods primarily measure task completion, path efficiency, or progress toward the goal, whereas we evaluate budget awareness as a first-class deployability capability: an agent must know not only what to do next, but also how much token or financial budget it is still likely to consume, how uncertain that estimate is, and whether this belief becomes better calibrated as the trajectory unfolds.
+
+\subsection{Reference Index}
+\label{sec:related-work-reference-index}
+
+\begin{enumerate}
+\item \emph{Constrained Policy Optimization}~\cite{achiam2017constrained}
+\item \emph{Reward Constrained Policy Optimization}~\cite{tessler2019reward}
+\item \emph{Budgeted Reinforcement Learning in Continuous State Space}~\cite{carrara2019budgeted}
+\item \emph{Safe Reinforcement Learning in Constrained Markov Decision Processes}~\cite{wachi2020safe}
+\item \emph{Constrained Upper Confidence Reinforcement Learning}~\cite{zheng2020constrained}
+\item \emph{Constrained Variational Policy Optimization for Safe Reinforcement Learning}~\cite{liu2022constrainedvariational}
+\item \emph{Near-optimal Conservative Exploration in Reinforcement Learning under Episode-wise Constraints}~\cite{li2023nearoptimal}
+\item \emph{Safe Reinforcement Learning for Constrained Markov Decision Processes with Stochastic Stopping Time}~\cite{mazumdar2024safe}
+\item \emph{Adaptive Stopping for Multi-Turn LLM Reasoning}~\cite{zhou2026adaptive}
+\item \emph{Budget-Constrained Agentic Large Language Models: Intention-Based Planning for Costly Tool Use}~\cite{liu2026budgetconstrained}
+\item \emph{Calibrate-Then-Act: Cost-Aware Exploration in LLM Agents}~\cite{ding2026calibratethenact}
+\item \emph{Quantifying the Accuracy and Cost Impact of Design Decisions in Budget-Constrained Agentic LLM Search}~\cite{mccleary2026quantifying}
+\item \emph{Distribution-Free Predictive Inference For Regression}~\cite{lei2018distributionfree}
+\item \emph{High-Quality Prediction Intervals for Deep Learning: A Distribution-Free, Ensembled Approach}~\cite{pearce2018highquality}
+\item \emph{Accurate Uncertainties for Deep Learning Using Calibrated Regression}~\cite{kuleshov2018accurate}
+\item \emph{Conformalized Quantile Regression}~\cite{romano2019conformalized}
+\item \emph{Deep Evidential Regression}~\cite{amini2020deep}
+\item \emph{Beyond Pinball Loss: Quantile Methods for Calibrated Uncertainty Quantification}~\cite{chung2021beyond}
+\item \emph{Evaluating and Calibrating Uncertainty Prediction in Regression Tasks}~\cite{levi2022evaluating}
+\item \emph{Adaptive Computation Time for Recurrent Neural Networks}~\cite{graves2016adaptive}
+\item \emph{BranchyNet: Fast Inference via Early Exiting from Deep Neural Networks}~\cite{teerapittayanon2016branchynet}
+\item \emph{SkipNet: Learning Dynamic Routing in Convolutional Networks}~\cite{wang2018skipnet}
+\item \emph{Shallow-Deep Networks: Understanding and Mitigating Network Overthinking}~\cite{kaya2019shallowdeep}
+\item \emph{Learning to Stop While Learning to Predict}~\cite{chen2020learningtostop}
+\item \emph{Learning to Skip for Language Modeling}~\cite{zeng2023learningtoskip}
+\item \emph{Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters}~\cite{snell2025scaling}
+\item \emph{s1: Simple test-time scaling}~\cite{muennighoff2025s1}
+\item \emph{Language Models (Mostly) Know What They Know}~\cite{kadavath2022language}
+\item \emph{Can LLMs Express Their Uncertainty? An Empirical Evaluation of Confidence Elicitation in LLMs}~\cite{xiong2024can}
+\item \emph{Large Language Models Must Be Taught to Know What They Don't Know}~\cite{kapoor2024large}
+\item \emph{Can Large Language Models Faithfully Express Their Intrinsic Uncertainty in Words?}~\cite{yona2024can}
+\item \emph{Towards A Unified View of Answer Calibration for Multi-Step Reasoning}~\cite{deng2024towards}
+\item \emph{SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models}~\cite{manakul2023selfcheckgpt}
+\item \emph{Self-Refine: Iterative Refinement with Self-Feedback}~\cite{madaan2023selfrefine}
+\item \emph{Reflexion: Language Agents with Verbal Reinforcement Learning}~\cite{shinn2023reflexion}
+\item \emph{CRITIC: Large Language Models Can Self-Correct with Tool-Interactive Critiquing}~\cite{gou2024critic}
+\item \emph{Large Language Models have Intrinsic Self-Correction Ability}~\cite{liu2024intrinsicselfcorrection}
+\item \emph{Uncertainty of Thoughts: Uncertainty-Aware Planning Enhances Information Seeking in Large Language Models}~\cite{hu2024uncertainty}
+\item \emph{Devil's Advocate: Anticipatory Reflection for LLM Agents}~\cite{wang2024devils}
+\item \emph{Learning From Failure: Integrating Negative Examples when Fine-tuning Large Language Models as Agents}~\cite{wang2024learningfromfailure}
+\item \emph{AgentRx: Diagnosing AI Agent Failures from Execution Trajectories}~\cite{barke2026agentrx}
+\item \emph{ReAct: Synergizing Reasoning and Acting in Language Models}~\cite{yao2023react}
+\item \emph{WebShop: Towards Scalable Real-World Web Interaction with Grounded Language Agents}~\cite{yao2022webshop}
+\item \emph{WebArena: A Realistic Web Environment for Building Autonomous Agents}~\cite{zhou2023webarena}
+\item \emph{AgentBench: Evaluating LLMs as Agents}~\cite{liu2024agentbench}
+\item \emph{ALFWorld: Aligning Text and Embodied Environments for Interactive Learning}~\cite{shridhar2021alfworld}
+\item \emph{Self-Monitoring Navigation Agent via Auxiliary Progress Estimation}~\cite{ma2019selfmonitoring}
+\item \emph{The Regretful Agent: Heuristic-Aided Navigation through Progress Estimation}~\cite{ma2019theregretful}
+\end{enumerate}

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 
-ROOT = Path("/u/ylin30")
+ROOT = Path.home()
 ROLLOUT_PATH = ROOT / "database/origin/sokoban-origin-gpt5.2-instant-128-main-new/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
 ESTIMATION_PATH = ROOT / "database/estimation/sokoban-origin-gpt5.2-instant-128-main-new_gpt5.2-instant-token-estimation-test/sokoban-origin-gpt5.2-instant-128-main-new_gpt5.2-instant-token-estimation-test.json"
 OUT_DIR = ROOT / "figure/agent-budget-control/figure-sokoban-gpt5.2instant-new"

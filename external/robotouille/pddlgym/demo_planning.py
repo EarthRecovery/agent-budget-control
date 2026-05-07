@@ -1,7 +1,4 @@
-"""Demonstrates PDDLGym usages with PDDLGym Planners
-
-See https://github.com/ronuchit/pddlgym_planners
-"""
+"""Demonstrates PDDLGym usages with PDDLGym Planners."""
 import matplotlib; matplotlib.use('agg') # For rendering
 
 from pddlgym.utils import run_demo
@@ -13,7 +10,7 @@ try:
     from pddlgym_planners.planner import PlanningFailure
 except ModuleNotFoundError:
     raise Exception("To run this demo file, install the " + \
-        "PDDLGym Planners repository (https://github.com/ronuchit/pddlgym_planners)")
+        "PDDLGym Planners repository.")
 
 def create_single_plan_policy(env, planner):
     plan = None

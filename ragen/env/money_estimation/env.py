@@ -194,11 +194,11 @@ def _sample_half_reachable_target_cash(
     rng: random.Random,
 ) -> int:
     if reachable:
-        sampled_ratio = rng.uniform(0.92, 0.99)
+        sampled_ratio = rng.uniform(0.50, 1.00)
         target_cash_usd = int(round(float(final_cash_usd) * sampled_ratio))
         return min(int(final_cash_usd), target_cash_usd)
 
-    sampled_ratio = rng.uniform(1.01, 1.10)
+    sampled_ratio = rng.uniform(1.01, 2.00)
     target_cash_usd = int(round(float(final_cash_usd) * sampled_ratio))
     if target_cash_usd <= int(final_cash_usd):
         target_cash_usd = int(final_cash_usd) + max(
@@ -206,6 +206,140 @@ def _sample_half_reachable_target_cash(
             int(round(abs(float(final_cash_usd)) * 0.05)),
         )
     return target_cash_usd
+
+
+def _sample_ratio_between(
+    rng: random.Random,
+    lower: float,
+    upper: float,
+) -> float:
+    lower = float(lower)
+    upper = float(upper)
+    if lower > upper:
+        lower, upper = upper, lower
+    if abs(upper - lower) < 1e-12:
+        return lower
+    return rng.uniform(lower, upper)
+
+
+def _build_constraints_from_ratios(
+    *,
+    final_cash_usd: int,
+    actual_total_time_weeks: int,
+    actual_total_warehouse_item_weeks: int,
+    actual_total_cost_usd: int,
+    target_cash_ratio: float,
+    time_budget_ratio: float,
+    warehouse_budget_ratio: float,
+    cost_budget_ratio: float,
+) -> Dict[str, int]:
+    return {
+        "target_cash_usd": int(round(float(final_cash_usd) * float(target_cash_ratio))),
+        "budget_time_weeks": _resolve_budget(
+            total_value=actual_total_time_weeks,
+            absolute_value=None,
+            ratio=time_budget_ratio,
+        ),
+        "budget_warehouse_item_weeks": _resolve_budget(
+            total_value=actual_total_warehouse_item_weeks,
+            absolute_value=None,
+            ratio=warehouse_budget_ratio,
+        ),
+        "budget_cost_usd": _resolve_budget(
+            total_value=actual_total_cost_usd,
+            absolute_value=None,
+            ratio=cost_budget_ratio,
+        ),
+    }
+
+
+def _constraints_allow_rollout_success(
+    *,
+    final_cash_usd: int,
+    actual_total_time_weeks: int,
+    actual_total_warehouse_item_weeks: int,
+    actual_total_cost_usd: int,
+    rollout_success: bool,
+    constraints: Dict[str, int],
+) -> bool:
+    return bool(
+        rollout_success
+        and actual_total_time_weeks <= int(constraints["budget_time_weeks"])
+        and actual_total_warehouse_item_weeks <= int(constraints["budget_warehouse_item_weeks"])
+        and actual_total_cost_usd <= int(constraints["budget_cost_usd"])
+        and final_cash_usd >= int(constraints["target_cash_usd"])
+    )
+
+
+def _sample_half_reachable_constraints(
+    *,
+    final_cash_usd: int,
+    actual_total_time_weeks: int,
+    actual_total_warehouse_item_weeks: int,
+    actual_total_cost_usd: int,
+    rollout_success: bool,
+    reachable: bool,
+    time_budget_ratio: float,
+    warehouse_budget_ratio: float,
+    cost_budget_ratio: float,
+    rng: random.Random,
+) -> Dict[str, int]:
+    if reachable:
+        target_cash_usd = _sample_half_reachable_target_cash(
+            final_cash_usd,
+            reachable=True,
+            rng=rng,
+        )
+        sampled_time_ratio = _sample_ratio_between(
+            rng,
+            1.0,
+            max(1.0, float(time_budget_ratio)),
+        )
+        sampled_warehouse_ratio = _sample_ratio_between(
+            rng,
+            1.0,
+            max(1.0, float(warehouse_budget_ratio)),
+        )
+        sampled_cost_ratio = _sample_ratio_between(
+            rng,
+            1.0,
+            max(1.0, float(cost_budget_ratio)),
+        )
+        return _build_constraints_from_ratios(
+            final_cash_usd=final_cash_usd,
+            actual_total_time_weeks=actual_total_time_weeks,
+            actual_total_warehouse_item_weeks=actual_total_warehouse_item_weeks,
+            actual_total_cost_usd=actual_total_cost_usd,
+            target_cash_ratio=(
+                float(target_cash_usd) / float(final_cash_usd)
+                if int(final_cash_usd) != 0
+                else 0.0
+            ),
+            time_budget_ratio=sampled_time_ratio,
+            warehouse_budget_ratio=sampled_warehouse_ratio,
+            cost_budget_ratio=sampled_cost_ratio,
+        )
+    else:
+        while True:
+            constraints = _build_constraints_from_ratios(
+                final_cash_usd=final_cash_usd,
+                actual_total_time_weeks=actual_total_time_weeks,
+                actual_total_warehouse_item_weeks=actual_total_warehouse_item_weeks,
+                actual_total_cost_usd=actual_total_cost_usd,
+                target_cash_ratio=_sample_ratio_between(rng, 0.50, 2.00),
+                time_budget_ratio=_sample_ratio_between(rng, 0.50, 2.00),
+                warehouse_budget_ratio=_sample_ratio_between(rng, 0.50, 2.00),
+                cost_budget_ratio=_sample_ratio_between(rng, 0.50, 2.00),
+            )
+            if not _constraints_allow_rollout_success(
+                final_cash_usd=final_cash_usd,
+                actual_total_time_weeks=actual_total_time_weeks,
+                actual_total_warehouse_item_weeks=actual_total_warehouse_item_weeks,
+                actual_total_cost_usd=actual_total_cost_usd,
+                rollout_success=rollout_success,
+                constraints=constraints,
+            ):
+                return constraints
 
 
 def _normalize_interval(lower: float, upper: float) -> Tuple[float, float]:
@@ -308,10 +442,10 @@ class MoneyEstimationEnv(BaseLanguageBasedEnv):
             )
         return payload
 
-    def _build_half_reachable_target_cash_map(
+    def _build_half_reachable_constraints_map(
         self,
         prepared_rollouts: List[Dict[str, Any]],
-    ) -> Dict[int, int]:
+    ) -> Dict[int, Dict[str, int]]:
         rng = random.Random(int(self.config.target_cash_half_reachable_seed))
         rollout_indices = [int(entry["rollout_index"]) for entry in prepared_rollouts]
         shuffled_rollout_indices = list(rollout_indices)
@@ -320,15 +454,22 @@ class MoneyEstimationEnv(BaseLanguageBasedEnv):
             shuffled_rollout_indices[: len(shuffled_rollout_indices) // 2]
         )
 
-        target_cash_by_rollout: Dict[int, int] = {}
+        constraints_by_rollout: Dict[int, Dict[str, int]] = {}
         for entry in prepared_rollouts:
             rollout_index = int(entry["rollout_index"])
-            target_cash_by_rollout[rollout_index] = _sample_half_reachable_target_cash(
-                int(entry["final_cash_usd"]),
+            constraints_by_rollout[rollout_index] = _sample_half_reachable_constraints(
+                final_cash_usd=int(entry["final_cash_usd"]),
+                actual_total_time_weeks=int(entry["actual_total_time_weeks"]),
+                actual_total_warehouse_item_weeks=int(entry["actual_total_warehouse_item_weeks"]),
+                actual_total_cost_usd=int(entry["actual_total_cost_usd"]),
+                rollout_success=bool(entry["rollout_success"]),
                 reachable=rollout_index not in unreachable_rollouts,
+                time_budget_ratio=float(self.config.time_budget_ratio),
+                warehouse_budget_ratio=float(self.config.warehouse_budget_ratio),
+                cost_budget_ratio=float(self.config.cost_budget_ratio),
                 rng=rng,
             )
-        return target_cash_by_rollout
+        return constraints_by_rollout
 
     def _flatten_rollouts(self, rollouts: List[Dict[str, Any]]) -> List[MoneyEstimationSample]:
         prepared_rollouts: List[Dict[str, Any]] = []
@@ -354,6 +495,7 @@ class MoneyEstimationEnv(BaseLanguageBasedEnv):
                 or actual_total_cost_usd is None
             ):
                 continue
+            rollout_success = _resolve_rollout_success(rollout, turns)
 
             prepared_rollouts.append(
                 {
@@ -364,12 +506,13 @@ class MoneyEstimationEnv(BaseLanguageBasedEnv):
                     "actual_total_warehouse_item_weeks": int(actual_total_warehouse_item_weeks),
                     "actual_total_cost_usd": int(actual_total_cost_usd),
                     "actual_total_time_weeks": int(actual_total_time_weeks),
+                    "rollout_success": bool(rollout_success),
                 }
             )
 
-        target_cash_by_rollout: Dict[int, int] = {}
+        constraints_by_rollout: Dict[int, Dict[str, int]] = {}
         if str(self.config.target_cash_mode) == "half_reachable":
-            target_cash_by_rollout = self._build_half_reachable_target_cash_map(
+            constraints_by_rollout = self._build_half_reachable_constraints_map(
                 prepared_rollouts
             )
 
@@ -385,30 +528,41 @@ class MoneyEstimationEnv(BaseLanguageBasedEnv):
             actual_total_cost_usd = int(prepared_rollout["actual_total_cost_usd"])
             actual_total_time_weeks = int(prepared_rollout["actual_total_time_weeks"])
 
-            target_cash_usd = _resolve_target_cash(
-                final_cash_usd=final_cash_usd,
-                absolute_value=self.config.target_cash_usd,
-                ratio=self.config.target_cash_ratio,
-                mode=str(self.config.target_cash_mode),
-                half_reachable_target_cash_usd=target_cash_by_rollout.get(rollout_index),
-            )
-            budget_time_weeks = _resolve_budget(
-                total_value=actual_total_time_weeks,
-                absolute_value=self.config.time_budget_weeks,
-                ratio=self.config.time_budget_ratio,
-            )
-            budget_warehouse_item_weeks = _resolve_budget(
-                total_value=actual_total_warehouse_item_weeks,
-                absolute_value=self.config.warehouse_budget_item_weeks,
-                ratio=self.config.warehouse_budget_ratio,
-            )
-            budget_cost_usd = _resolve_budget(
-                total_value=actual_total_cost_usd,
-                absolute_value=self.config.cost_budget_usd,
-                ratio=self.config.cost_budget_ratio,
-            )
+            if str(self.config.target_cash_mode) == "half_reachable":
+                sampled_constraints = constraints_by_rollout.get(rollout_index)
+                if sampled_constraints is None:
+                    raise ValueError("half_reachable mode requires per-rollout sampled constraints.")
+                target_cash_usd = int(sampled_constraints["target_cash_usd"])
+                budget_time_weeks = int(sampled_constraints["budget_time_weeks"])
+                budget_warehouse_item_weeks = int(
+                    sampled_constraints["budget_warehouse_item_weeks"]
+                )
+                budget_cost_usd = int(sampled_constraints["budget_cost_usd"])
+            else:
+                target_cash_usd = _resolve_target_cash(
+                    final_cash_usd=final_cash_usd,
+                    absolute_value=self.config.target_cash_usd,
+                    ratio=self.config.target_cash_ratio,
+                    mode=str(self.config.target_cash_mode),
+                    half_reachable_target_cash_usd=None,
+                )
+                budget_time_weeks = _resolve_budget(
+                    total_value=actual_total_time_weeks,
+                    absolute_value=self.config.time_budget_weeks,
+                    ratio=self.config.time_budget_ratio,
+                )
+                budget_warehouse_item_weeks = _resolve_budget(
+                    total_value=actual_total_warehouse_item_weeks,
+                    absolute_value=self.config.warehouse_budget_item_weeks,
+                    ratio=self.config.warehouse_budget_ratio,
+                )
+                budget_cost_usd = _resolve_budget(
+                    total_value=actual_total_cost_usd,
+                    absolute_value=self.config.cost_budget_usd,
+                    ratio=self.config.cost_budget_ratio,
+                )
 
-            rollout_success = _resolve_rollout_success(rollout, turns)
+            rollout_success = bool(prepared_rollout["rollout_success"])
             actual_can_finish = bool(
                 rollout_success
                 and actual_total_time_weeks <= budget_time_weeks

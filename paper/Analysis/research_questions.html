@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Analysis Draft</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="research_questions_pdf.css" />
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Analysis Draft</h1>
+</header>
+<h2 id="analysis">5. Analysis</h2>
+<h2 id="estimation-ability-is-separable-from-rollout-ability">5.1.
+Estimation Ability Is Separable from Rollout Ability</h2>
+<p>We first examine whether strong task performance translates into
+strong budget estimation, and whether first-turn estimates are
+sufficient to characterize this ability. The current results suggest
+that the answer to both questions is no. Rollout ability and estimation
+ability are only partially coupled: a model can be a strong actor but a
+weak estimator, and a model that appears strong on the first estimation
+turn can later become weak when evaluated over the full trajectory. This
+means that first-turn estimation is at best an early hint rather than a
+reliable summary of online budget awareness.</p>
+<p>The first piece of evidence is the instability between first-turn and
+all-turn feasibility judgment. Across benchmarks, the ranking of
+estimators changes once we move from a task-start snapshot to the full
+trajectory. For example, on <code>SWE-bench</code>, <code>Qwen</code> is
+the strongest first-turn classifier, <code>Gemini</code> becomes the
+strongest all-turn classifier, while <code>GPT-5.2</code> is the
+strongest interval estimator. This ranking reversal is exactly what we
+would expect if budget estimation were an online process that improves,
+degrades, or changes character as more state information becomes
+available.</p>
+<p>The second piece of evidence is the decoupling between task success
+and estimation quality. On <code>SearchR1</code>, <code>Opus</code> is
+the strongest actor (<code>75.8%</code> rollout success), yet
+<code>Sonnet</code> is the strongest interval estimator
+(<code>36.5%</code> success-case interval hit versus <code>23.1%</code>
+for <code>Opus</code>). On <code>Warehouse</code>, this separation is
+even sharper: all five models achieve <code>100%</code> rollout success,
+but joint interval hit still spans from <code>28.8%</code> down to
+<code>7.5%</code>. In other words, solving the task and knowing how much
+budget remains are empirically different abilities.</p>
+<p>This suggests a more precise interpretation of online estimation.
+First-turn estimation mostly reflects prior beliefs about task
+difficulty before substantial evidence accumulates. All-turn estimation,
+by contrast, reflects whether the model can update that belief as the
+trajectory unfolds. A good analysis section should therefore treat
+first-turn metrics as a prior-quality diagnostic and all-turn metrics as
+an online belief-update diagnostic, rather than collapsing them into a
+single feasibility score.</p>
+<p>Takeaway. Budget estimation should be understood as an online
+belief-updating capability rather than as a byproduct of actor
+strength.</p>
+<figure>
+<img
+src="../../../figure/agent-budget-control/overall/finding2_first_turn_vs_all_turn.png"
+alt="RQ1 Figure 1" />
+<figcaption aria-hidden="true">RQ1 Figure 1</figcaption>
+</figure>
+<p><em>Figure 5.1. First-turn and all-turn feasibility rankings are not
+stable. The estimator that looks strongest at task start is often not
+the strongest once the full trajectory is taken into account.</em></p>
+<figure>
+<img
+src="../../../figure/agent-budget-control/overall/finding9_actor_vs_estimator.png"
+alt="RQ1 Figure 2" />
+<figcaption aria-hidden="true">RQ1 Figure 2</figcaption>
+</figure>
+<p><em>Figure 5.2. Rollout success and estimator strength are visibly
+decoupled. Strong actors are not consistently strong estimators, and the
+separation holds across all benchmark families.</em></p>
+<h2 id="bias-direction-is-structured-rather-than-random">5.2. Bias
+Direction Is Structured Rather Than Random</h2>
+<p>We next ask why some models systematically underestimate remaining
+budget while others overestimate it, and whether these errors are random
+or structurally organized. The results favor the second interpretation.
+Bias direction is primarily benchmark-dependent, with model capability
+modulating how that benchmark-level pressure is expressed.
+<code>SearchR1</code> and <code>SWE-bench</code> are mainly optimistic;
+<code>Sokoban</code> exhibits a capability-dependent split between
+conservative stronger estimators and optimistic weaker ones; and
+<code>Warehouse</code> adds a third failure mode in which models predict
+<code>impossible</code> too early even when the rollout is still
+finishable.</p>
+<p>At the benchmark level, the cleanest pattern is that bias direction
+clusters by environment. This is visible in the aggregate bias-driver
+figure: benchmarks do not merely differ in error magnitude, but in the
+dominant <em>type</em> of miss. <code>SearchR1</code> and
+<code>SWE-bench</code> are dominated by optimistic misses, meaning the
+upper bound of the predicted interval often still falls below the actual
+remaining budget. This suggests that models in these environments
+systematically fail to represent unresolved future work.</p>
+<p><code>Sokoban</code> shows a more subtle phenomenon. Here, bias
+direction depends strongly on estimator strength. The stronger interval
+estimators such as <code>Opus</code> and <code>Sonnet</code> skew
+conservative, while weaker estimators such as <code>Gemini</code> and
+<code>Qwen</code> flip optimistic. A plausible interpretation is that
+stronger models better recognize irreversible risk and therefore hedge
+upward, whereas weaker models misread local progress as evidence that
+the puzzle is nearly solved. Under this reading, optimism is not a sign
+of confidence but of incomplete difficulty modeling.</p>
+<p><code>Warehouse</code> introduces a qualitatively different
+asymmetry. Instead of simply shifting intervals upward or downward, some
+models fail at the gating stage itself by predicting
+<code>impossible</code> too early. <code>GPT-5.2</code> labels early
+actually-finishable states as impossible <code>72.7%</code> of the time,
+which indicates that part of the bias problem lies upstream of interval
+calibration. In other words, the model can fail before it ever reaches
+the question of “how much budget remains.”</p>
+<p>Taken together, these results suggest that optimism and conservatism
+are not best understood as generic calibration noise. They are
+structured error regimes. Some come from underestimating unresolved
+future work, some from over-hedging against irreversible dynamics, and
+some from prematurely collapsing feasibility altogether.</p>
+<p>Takeaway. Budget estimation errors form task-conditioned bias regimes
+rather than random calibration noise.</p>
+<figure>
+<img
+src="../../../figure/agent-budget-control/overall/finding13_bias_direction_drivers.png"
+alt="RQ2 Figure 1" />
+<figcaption aria-hidden="true">RQ2 Figure 1</figcaption>
+</figure>
+<p><em>Figure 5.3. Bias direction is primarily a benchmark effect.
+Different tasks induce different dominant miss directions, and stage
+effects only modulate this higher-level structure.</em></p>
+<figure>
+<img
+src="../../../figure/agent-budget-control/overall/finding6_sokoban_conservative_bias.png"
+alt="RQ2 Figure 2" />
+<figcaption aria-hidden="true">RQ2 Figure 2</figcaption>
+</figure>
+<p><em>Figure 5.4. Sokoban reveals a capability-dependent split:
+stronger estimators skew conservative, while weaker ones become
+optimistic. This indicates that bias direction itself carries
+information about estimator competence.</em></p>
+<h2
+id="strong-estimators-are-defined-by-calibration-not-feasibility-judgment">5.3.
+Strong Estimators Are Defined by Calibration, Not Feasibility
+Judgment</h2>
+<p>If rollout success and feasibility classification are not sufficient
+to explain estimation quality, what then distinguishes a strong
+estimator from a weak one? The present results suggest that strong
+estimators should be understood as well-calibrated interval predictors
+rather than simply strong binary judges. Across the 15 token-budget
+model-task points, success-case interval hit correlates only weakly with
+feasibility macro-F1 (<code>r ≈ 0.36</code> first-turn;
+<code>r ≈ 0.35</code> all-turn), but more strongly with midpoint bias
+(<code>r ≈ -0.67</code>) and width adequacy (<code>r ≈ 0.62</code>).
+What separates strong estimators is therefore not merely the ability to
+say <code>can_finish</code> or <code>impossible</code>, but the ability
+to place the interval center near the truth while keeping the interval
+wide enough to cover real variation without collapsing.</p>
+<p>The strength-signal figure makes this point directly. Binary
+feasibility metrics have only modest correlation with success-case
+interval hit, and rollout success is also an imperfect proxy. By
+contrast, calibration-oriented quantities such as midpoint bias and
+width adequacy line up much more closely with interval performance. This
+is the main reason why some models that appear strong under coarse task
+metrics still fail badly as estimators.</p>
+<p>The phenotype map gives a more intuitive geometric view. Strong
+estimators cluster in the low-bias, non-collapsed-width region. Weak
+estimators occupy two failure corners: either they have badly shifted
+midpoints, or they produce intervals whose width has collapsed relative
+to true outcome spread. <code>Qwen</code> on <code>SearchR1</code> and
+<code>SWE-bench</code> is a particularly clear example of collapse:
+feasibility judgment may remain non-trivial, but interval prediction
+becomes nearly unusable because the estimates are both too low and too
+narrow.</p>
+<p>This result has a methodological implication for the paper. If we
+want to evaluate or train budget-aware agents, the right target is not
+“higher feasibility F1” alone. The more informative target is a joint
+estimator phenotype: low midpoint bias, sufficient width, and strong
+online coverage. Put differently, a strong estimator is not merely a
+good classifier with numbers attached; it is a calibrated uncertainty
+model over remaining resource consumption.</p>
+<p>Takeaway. Interval calibration, rather than binary feasibility
+judgment, is the defining property of estimator quality.</p>
+<figure>
+<img
+src="../../../figure/agent-budget-control/overall/finding14_estimator_strength_signals.png"
+alt="RQ3 Figure 1" />
+<figcaption aria-hidden="true">RQ3 Figure 1</figcaption>
+</figure>
+<p><em>Figure 5.5. Calibration signals explain interval quality better
+than binary or actor proxies. Feasibility metrics are only weakly
+correlated with success-case interval hit, while midpoint bias and width
+adequacy are substantially more informative.</em></p>
+<figure>
+<img
+src="../../../figure/agent-budget-control/overall/finding15_token_phenotype_map.png"
+alt="RQ3 Figure 2" />
+<figcaption aria-hidden="true">RQ3 Figure 2</figcaption>
+</figure>
+<p><em>Figure 5.6. Strong token-budget estimators cluster in the
+low-bias, non-collapsed-width corner. This supports the view that
+estimator strength is a calibration phenotype rather than a
+binary-judgment phenotype.</em></p>
+<h2
+id="warehouse-exposes-a-coupled-multi-budget-estimation-problem">5.4.
+Warehouse Exposes a Coupled Multi-Budget Estimation Problem</h2>
+<p>The final question concerns the interaction among <code>time</code>,
+<code>cost</code>, and <code>warehouse_item_weeks</code> in the
+<code>Warehouse</code> setting. The results strongly support the view
+that this is not merely three independent one-dimensional estimation
+tasks. Instead, <code>Warehouse</code> poses a coupled
+feasibility-and-calibration problem with two distinct bottlenecks.
+First, the model must avoid declaring <code>impossible</code> too early.
+Second, conditional on believing the task is still finishable, it must
+jointly calibrate three constrained budgets whose error profiles are not
+symmetric. Single-dimension competence does not naturally transfer to
+joint coverage.</p>
+<p>The dimension-specialization figure shows that the three budgets are
+not equally hard and are not mastered by the same model.
+<code>Opus</code> is strongest on <code>time</code> and
+<code>warehouse_item_weeks</code> (<code>41.8%</code> and
+<code>42.1%</code> strict hit), while <code>Sonnet</code> is strongest
+on <code>cost</code> (<code>33.1%</code>). This already suggests that
+the three dimensions expose partially distinct reasoning skills. Time
+appears closer to rollout progress, warehouse occupancy captures state
+accumulation, and cost behaves as the most globally compounding
+dimension.</p>
+<p>The joint-gap figure then shows why single-dimension progress is not
+enough. Even when a model achieves non-trivial hit rates on individual
+dimensions, full all-dimension coverage drops sharply. <code>Opus</code>
+has the best joint hit at <code>28.8%</code>, yet this is still
+meaningfully lower than its average single-dimension hit. For weaker
+models, the gap is much worse. This “joint calibration tax” is the
+clearest sign that the three budgets interact rather than decompose
+cleanly.</p>
+<p>This leads to a useful decomposition of the <code>Warehouse</code>
+difficulty. The first problem is <em>feasibility gating</em>: can the
+model recognize that the task is still finishable, instead of predicting
+<code>impossible</code> too early? The second problem is <em>multi-head
+coordination</em>: can the model produce intervals for
+<code>time</code>, <code>cost</code>, and
+<code>warehouse_item_weeks</code> that are individually plausible and
+jointly consistent with the same future rollout? The data suggests that
+many failures arise because models may succeed on one of these two
+layers while failing on the other.</p>
+<p>For the paper narrative, <code>Warehouse</code> is therefore valuable
+not merely as an external-budget benchmark, but as evidence that budget
+awareness becomes qualitatively harder once resource dimensions are
+coupled. The multi-budget case does not simply add more numbers; it
+exposes coordination failures that are invisible in one-dimensional
+token estimation.</p>
+<p>Takeaway. Multi-budget estimation introduces a joint calibration tax
+beyond single-dimension prediction.</p>
+<figure>
+<img
+src="../../../figure/agent-budget-control/overall/finding11_warehouse_dimension_specialization.png"
+alt="RQ4 Figure 1" />
+<figcaption aria-hidden="true">RQ4 Figure 1</figcaption>
+</figure>
+<p><em>Figure 5.7. The three Warehouse budgets show model specialization
+by dimension. Different models lead on <code>time</code>,
+<code>warehouse_item_weeks</code>, and <code>cost</code>, indicating
+that the three sub-problems are not identical.</em></p>
+<figure>
+<img
+src="../../../figure/agent-budget-control/overall/finding12_warehouse_joint_gap.png"
+alt="RQ4 Figure 2" />
+<figcaption aria-hidden="true">RQ4 Figure 2</figcaption>
+</figure>
+<p><em>Figure 5.8. Joint multi-budget coverage is much harder than
+single-dimension coverage. This gap is the empirical signature of
+coupled-constraint estimation rather than independent scalar
+prediction.</em></p>
+</body>
+</html>

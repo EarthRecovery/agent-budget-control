@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 
-ROOT = Path("/u/ylin30")
+ROOT = Path.home()
 OUT_DIR = ROOT / "figure/agent-budget-control/warehouse-gpt5.2instant"
 ROLLOUT_PATH = ROOT / "database/origin/warehouse-origin-gpt5.2-instant-128-main/combined_gpt5.2-chat-latest_128seeds.json"
 ESTIMATION_PATH = ROOT / "database/estimation/warehouse-OpenAI-5.2-Instant_OpenAI-5.2-Instant-128-main/warehouse-OpenAI-5.2-Instant_OpenAI-5.2-Instant-128-main.json"

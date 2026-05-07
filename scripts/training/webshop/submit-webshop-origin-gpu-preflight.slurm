@@ -11,12 +11,12 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=00:15:00
-#SBATCH --output=/u/ylin30/agent-budget-control/logs/slurm/webshop-origin-gpu-check-%j.out
-#SBATCH --error=/u/ylin30/agent-budget-control/logs/slurm/webshop-origin-gpu-check-%j.err
+#SBATCH --output=logs/slurm/webshop-origin-gpu-check-%j.out
+#SBATCH --error=logs/slurm/webshop-origin-gpu-check-%j.err
 
 set -euo pipefail
 
-REPO_ROOT="/u/ylin30/agent-budget-control"
+REPO_ROOT="${HOME}/agent-budget-control"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-ragenv2}"
 WANDB_MODE="${WANDB_MODE:-online}"
 WANDB_KEY_FILE="${WANDB_KEY_FILE:-$HOME/.config/wandb/api_key}"
@@ -94,6 +94,5 @@ import wandb
 print("Python dependency check: hydra/omegaconf/ray/wandb OK")
 PY
 
-PREFLIGHT_ONLY="${PREFLIGHT_ONLY}" bash scripts/training/mixed-budget-training-webshop-origin.sh "$@"
-
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY}" bash scripts/training/webshop/mixed-budget-training-webshop-origin.sh "$@"
 

@@ -9,8 +9,11 @@ PROJECT_ROOT=${PROJECT_ROOT:-"$HOME/agent-budget-control"}
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
-MODEL_NAME=${MODEL_NAME:-Claude-Sonnet-4.6-low-thinking}
+MODEL_NAME=${MODEL_NAME:-qwen/qwen3-235b-a22b-2507}
 REASONING_EFFORT=${REASONING_EFFORT:-}
+OPENROUTER_REASONING_ENABLED=${OPENROUTER_REASONING_ENABLED:-}
+OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-}
+DRY_RUN=${DRY_RUN:-0}
 
 case "$MODEL_NAME" in
   OpenAI-5.2-Instant)
@@ -49,34 +52,50 @@ case "$MODEL_NAME" in
     PROVIDER=openrouter
     MODEL_NAME=qwen/qwen3.6-plus
     ;;
-esac
-
-case "$PROVIDER" in
-  openai)
-    : "${OPENAI_API_KEY:?Please export OPENAI_API_KEY before running this evaluation.}"
+  OpenRouter-Gemini-3.1-Pro-Preview)
+    PROVIDER=openrouter
+    MODEL_NAME=google/gemini-3.1-pro-preview
+    REASONING_EFFORT=${REASONING_EFFORT:-low}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    MAX_TOKENS=${MAX_TOKENS:-800}
     ;;
-  anthropic)
-    : "${ANTHROPIC_API_KEY:?Please export ANTHROPIC_API_KEY before running this evaluation.}"
-    ;;
-  gemini)
-    : "${GEMINI_API_KEY:?Please export GEMINI_API_KEY before running this evaluation.}"
-    ;;
-  openrouter)
-    : "${OPENROUTER_API_KEY:?Please export OPENROUTER_API_KEY before running this evaluation.}"
-    ;;
-  together)
-    : "${TOGETHER_API_KEY:?Please export TOGETHER_API_KEY before running this evaluation.}"
-    ;;
-  deepseek)
-    : "${DEEPSEEK_API_KEY:?Please export DEEPSEEK_API_KEY before running this evaluation.}"
-    ;;
-  *)
-    echo "Unsupported PROVIDER: $PROVIDER" >&2
-    exit 1
+  qwen/qwen3-235b-a22b-2507)
+    PROVIDER=openrouter
+    MODEL_NAME=qwen/qwen3-235b-a22b-2507
+    REASONING_EFFORT=${REASONING_EFFORT:-low}
+    OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-1}
+    MAX_TOKENS=${MAX_TOKENS:-800}
     ;;
 esac
 
-RUN_NAME=${RUN_NAME:-warehouse-Claude-Sonnet-4.6-low-thinking_Claude-Sonnet-4.6-low-thinking-main}
+if [[ "$DRY_RUN" != "1" ]]; then
+  case "$PROVIDER" in
+    openai)
+      : "${OPENAI_API_KEY:?Please export OPENAI_API_KEY before running this evaluation.}"
+      ;;
+    anthropic)
+      : "${ANTHROPIC_API_KEY:?Please export ANTHROPIC_API_KEY before running this evaluation.}"
+      ;;
+    gemini)
+      : "${GEMINI_API_KEY:?Please export GEMINI_API_KEY before running this evaluation.}"
+      ;;
+    openrouter)
+      : "${OPENROUTER_API_KEY:?Please export OPENROUTER_API_KEY before running this evaluation.}"
+      ;;
+    together)
+      : "${TOGETHER_API_KEY:?Please export TOGETHER_API_KEY before running this evaluation.}"
+      ;;
+    deepseek)
+      : "${DEEPSEEK_API_KEY:?Please export DEEPSEEK_API_KEY before running this evaluation.}"
+      ;;
+    *)
+      echo "Unsupported PROVIDER: $PROVIDER" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+RUN_NAME=${RUN_NAME:-newwarehouse-qwen3-235b-main}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/${RUN_NAME}"}
 OUTPUT_JSON=${OUTPUT_JSON:-"$OUTPUT_DIR/${RUN_NAME}.json"}
@@ -94,7 +113,6 @@ ANTHROPIC_THINKING_BUDGET_TOKENS=${ANTHROPIC_THINKING_BUDGET_TOKENS:-}
 ANTHROPIC_THINKING_ADAPTIVE=${ANTHROPIC_THINKING_ADAPTIVE:-0}
 ANTHROPIC_THINKING_DISPLAY=${ANTHROPIC_THINKING_DISPLAY:-}
 ANTHROPIC_OUTPUT_EFFORT=${ANTHROPIC_OUTPUT_EFFORT:-}
-DRY_RUN=${DRY_RUN:-0}
 
 # Budget controls for the money_estimation evaluator.
 # Precedence rule:
@@ -109,15 +127,17 @@ DRY_RUN=${DRY_RUN:-0}
 #   totals?"
 # This keeps the realized final turn budget-feasible for successful rollouts.
 #
-# BUDGET_PRESET=half-reachable keeps the same auto-derived time / warehouse /
-# cost budgets, but ignores AUTO_TARGET_CASH_RATIO and instead perturbs each
-# rollout target cash so that roughly half of valid rollouts have an
-# unreachable target.
+# BUDGET_PRESET=half-reachable ignores AUTO_TARGET_CASH_RATIO and samples
+# per-rollout target cash plus time / warehouse / cost budgets. Half of the
+# rollouts are made reachable with tighter-but-still-feasible budgets and a
+# harder-but-still-feasible target. The other half repeatedly resample four
+# independent 50%-200% ratios for target cash, time budget, warehouse budget,
+# and cost budget until the rollout is impossible under the sampled constraints.
 BUDGET_PRESET=${BUDGET_PRESET:-half-reachable}
-AUTO_TARGET_CASH_RATIO=${AUTO_TARGET_CASH_RATIO:-0.98}
+AUTO_TARGET_CASH_RATIO=${AUTO_TARGET_CASH_RATIO:-0.8}
 AUTO_TIME_BUDGET_RATIO=${AUTO_TIME_BUDGET_RATIO:-1.0}
-AUTO_WAREHOUSE_BUDGET_RATIO=${AUTO_WAREHOUSE_BUDGET_RATIO:-1.02}
-AUTO_COST_BUDGET_RATIO=${AUTO_COST_BUDGET_RATIO:-1.02}
+AUTO_WAREHOUSE_BUDGET_RATIO=${AUTO_WAREHOUSE_BUDGET_RATIO:-1.2}
+AUTO_COST_BUDGET_RATIO=${AUTO_COST_BUDGET_RATIO:-1.2}
 HALF_REACHABLE_TARGET_SEED=${HALF_REACHABLE_TARGET_SEED:-42}
 #
 # TARGET_CASH_*:
@@ -160,11 +180,12 @@ else
   COST_BUDGET_RATIO=${COST_BUDGET_RATIO:-1.0}
 fi
 
-DEFAULT_INPUT_JSON="/u/ylin30/database/origin/warehouse-origin-claude-sonnet-4.6-128-main/combined_sonnet4.6-low_128seeds.json"
-INPUT_JSON=${INPUT_JSON:-"$DEFAULT_INPUT_JSON"}
+INPUT_SOURCE=${INPUT_SOURCE:-"${HOME}/database/origin/newwarehouse-qwen/combined_qwen3-235b_128seeds_harsh.json"}
+DEFAULT_INPUT_JSON="$OUTPUT_DIR/newwarehouse-sonnet-4-test_combined_rollouts.json"
+INPUT_JSON=${INPUT_JSON:-}
 
-if [[ ! -f "$INPUT_JSON" ]]; then
-  echo "Input json not found: $INPUT_JSON" >&2
+if [[ ! -e "$INPUT_SOURCE" && -z "$INPUT_JSON" ]]; then
+  echo "Input source not found: $INPUT_SOURCE" >&2
   exit 1
 fi
 
@@ -179,6 +200,41 @@ if [[ ! -f "$USER_PROMPT_FILE" ]]; then
 fi
 
 mkdir -p "$OUTPUT_DIR"
+
+if [[ -z "$INPUT_JSON" ]]; then
+  if [[ -d "$INPUT_SOURCE" ]]; then
+    INPUT_JSON="$DEFAULT_INPUT_JSON"
+    python - "$INPUT_SOURCE" "$INPUT_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+source_dir = Path(sys.argv[1])
+output_path = Path(sys.argv[2])
+rollouts = []
+for path in sorted(source_dir.glob("*.json")):
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if isinstance(payload, list):
+        rollouts.extend(payload)
+    elif isinstance(payload, dict):
+        rollouts.append(payload)
+    else:
+        raise SystemExit(f"Unsupported rollout payload in {path}: {type(payload).__name__}")
+output_path.parent.mkdir(parents=True, exist_ok=True)
+with output_path.open("w", encoding="utf-8") as handle:
+    json.dump(rollouts, handle, ensure_ascii=False, indent=2)
+print(f"Combined {len(rollouts)} rollout(s) from {source_dir} into {output_path}")
+PY
+  else
+    INPUT_JSON="$INPUT_SOURCE"
+  fi
+fi
+
+if [[ ! -f "$INPUT_JSON" ]]; then
+  echo "Input json not found: $INPUT_JSON" >&2
+  exit 1
+fi
 
 CMD=(
   python scripts/budget-estimation-benchmark/run_money_estimation_env.py
@@ -203,6 +259,16 @@ CMD=(
 if [[ -n "$REASONING_EFFORT" ]]; then
   CMD+=(--reasoning-effort "$REASONING_EFFORT")
 fi
+
+if [[ -n "$OPENROUTER_REASONING_ENABLED" ]]; then
+  CMD+=(--reasoning-enabled "$OPENROUTER_REASONING_ENABLED")
+fi
+
+case "${OPENROUTER_CACHE_ENABLED,,}" in
+  1|true|yes|on)
+    CMD+=(--cache-enabled)
+    ;;
+esac
 
 if [[ "$ANTHROPIC_THINKING_ENABLED" == "1" ]]; then
   CMD+=(--thinking-enabled)

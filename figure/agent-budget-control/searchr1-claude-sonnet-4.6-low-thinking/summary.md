@@ -13,5 +13,5 @@
 - Rollout cached-input share: 0.000
 - Estimation cached-input share: 0.000
 
-- Rollout source: `/u/ylin30/database/origin/searchr1-origin-Claude-Sonnet-4.6-low-thinking-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json`
-- Estimation source: `/u/ylin30/database/estimation/searchr1-origin-Claude-Sonnet-4.6-low-thinking-128-main_Claude-Sonnet-4.6-low-thinking-128-token-estimation-main/searchr1-origin-Claude-Sonnet-4.6-low-thinking-128-main_Claude-Sonnet-4.6-low-thinking-128-token-estimation-main.json`
+- Rollout source: `${HOME}/database/origin/searchr1-origin-Claude-Sonnet-4.6-low-thinking-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json`
+- Estimation source: `${HOME}/database/estimation/searchr1-origin-Claude-Sonnet-4.6-low-thinking-128-main_Claude-Sonnet-4.6-low-thinking-128-token-estimation-main/searchr1-origin-Claude-Sonnet-4.6-low-thinking-128-main_Claude-Sonnet-4.6-low-thinking-128-token-estimation-main.json`

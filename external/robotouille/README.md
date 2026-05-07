@@ -45,8 +45,6 @@
     <li><a href="#built-with">Built With</a></li>
     <li><a href="#citation">Citation</a></li>
     <li><a href="#license">License</a></li>
-    <li><a href="#contact">Contact</a></li>
-    <li><a href="#acknowledgments">Acknowledgments</a></li>
   </ol>
 </details>
 
@@ -154,7 +152,7 @@ Refer to the `README.md` under `environments/env_generator/` for details on proc
 
 ### Create your own Environment!
 
-To create your own environment, add another example into `environments/env_generator/examples/`. Follow the `README.md` under `environments/env_generator/` for details on how to customize the environment JSON. If you would like to modify the transitions of the environment entirely, refer to `robotouille.json` under `environments`. We are always adding more objects and transitions into Robotouille to increase the diversity of tasks. Please contact gg387@cornell.edu for more details if interested in contributing or learning more.
+To create your own environment, add another example into `environments/env_generator/examples/`. Follow the `README.md` under `environments/env_generator/` for details on how to customize the environment JSON. If you would like to modify the transitions of the environment entirely, refer to `robotouille.json` under `environments`. We are always adding more objects and transitions into Robotouille to increase the diversity of tasks.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -174,7 +172,7 @@ We appreciate all contributions to Robotouille. Bug fixes are always welcome, bu
 
 We build atop [Gym](https://www.gymlibrary.dev/index.html) environment and we render and take keyboard input using [PyGame](https://www.pygame.org/docs/), building on the [tutorial](https://www.gymlibrary.dev/content/environment_creation/) for making custom gym environments.
 
-[Currently broken [#37](https://github.com/portal-cornell/robotouille/issues/37)] We also support [PDDLGym](https://github.com/tomsilver/pddlgym); we programatically translate Robotouille into a PDDL domain and problem file which PDDLGym converts into a Gym environment.
+[Currently broken [#37](https://github.com/portal-cornell/robotouille/issues/37)] We also support PDDLGym; we programatically translate Robotouille into a PDDL domain and problem file which PDDLGym converts into a Gym environment.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -187,7 +185,6 @@ Please cite the [Robotouille](https://arxiv.org/pdf/2502.05227) paper if you use
 @inproceedings{
   gonzalez-pumariega2025robotouille,
   title={Robotouille: An Asynchronous Planning Benchmark for {LLM} Agents},
-  author={Gonzalo Gonzalez-Pumariega and Leong Su Yean and Neha Sunkara and Sanjiban Choudhury},
   booktitle={The Thirteenth International Conference on Learning Representations},
   year={2025},
   url={https://openreview.net/forum?id=OhUoTMxFIH}
@@ -208,10 +205,6 @@ Distributed under the MIT License. See `LICENSE.txt` for more information.
 
 
 <!-- CONTACT -->
-## Contact
-
-Gonzalo Gonzalez - gg387@cornell.edu
-
 Project Link: [https://github.com/portal-cornell/robotouille](https://github.com/portal-cornell/robotouille)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -219,8 +212,4 @@ Project Link: [https://github.com/portal-cornell/robotouille](https://github.com
 
 
 <!-- ACKNOWLEDGMENTS -->
-## Acknowledgments
-
-We thank [Nicole Thean (@nicolethean)](https://github.com/nicolethean) for her help with creating the assets that bring Robotouille to life!
-
 <p align="right">(<a href="#readme-top">back to top</a>)</p>

@@ -10,7 +10,7 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
 PROVIDER=${PROVIDER:-anthropic}
-MODEL_NAME=${MODEL_NAME:-OpenRouter-Gemini-3.1-Pro-Preview}
+MODEL_NAME=${MODEL_NAME:-OpenAI-5.2-Codex-low-thinking}
 REASONING_EFFORT=${REASONING_EFFORT:-}
 OPENROUTER_REASONING_ENABLED=${OPENROUTER_REASONING_ENABLED:-}
 OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-}
@@ -25,6 +25,11 @@ case "$MODEL_NAME" in
     PROVIDER=openai
     MODEL_NAME=gpt-5.2
     REASONING_EFFORT=${REASONING_EFFORT:-high}
+    ;;
+  OpenAI-5.2-Codex-low-thinking)
+    PROVIDER=openai
+    MODEL_NAME=gpt-5.2
+    REASONING_EFFORT=${REASONING_EFFORT:-low}
     ;;
   Claude-Opus-Latest)
     PROVIDER=anthropic
@@ -42,6 +47,11 @@ case "$MODEL_NAME" in
   Claude-Sonnet-4.6-low-thinking)
     PROVIDER=anthropic
     MODEL_NAME=claude-sonnet-4-6
+    ANTHROPIC_OUTPUT_EFFORT=${ANTHROPIC_OUTPUT_EFFORT:-low}
+    ;;
+  Claude-Opus-4.6-low-thinking)
+    PROVIDER=anthropic
+    MODEL_NAME=claude-opus-4-6
     ANTHROPIC_OUTPUT_EFFORT=${ANTHROPIC_OUTPUT_EFFORT:-low}
     ;;
   Gemini-Pro-Latest)
@@ -103,14 +113,15 @@ case "$PROVIDER" in
     ;;
 esac
 
-RUN_NAME=${RUN_NAME:-sokoban-origin-gemini-3.1-pro-preview-128-main_gemini-3.1-pro-preview-token-estimation-main}
+RUN_NAME=${RUN_NAME:-sokoban-origin-openai-5-2-codex-low-thinking-128-main_openai-5-2-codex-low-thinking-128-main}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/${RUN_NAME}"}
-INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/sokoban-origin-gemini-3.1-pro-preview-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"}
+INPUT_JSON=${INPUT_JSON:-"${HOME}/database/origin/sokoban-origin-openai-openai-5-2-codex-low-thinking-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"}
 OUTPUT_JSON=${OUTPUT_JSON:-"$OUTPUT_DIR/${RUN_NAME}.json"}
 TEMP_JSON=${TEMP_JSON:-"$OUTPUT_DIR/${RUN_NAME}_pairs.json"}
 SYSTEM_PROMPT_FILE=${SYSTEM_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_system.txt"}
 USER_PROMPT_FILE=${USER_PROMPT_FILE:-"$SCRIPT_DIR/prompts/sokoban_estimation_user.txt"}
+TURN_USAGE_MODE=${TURN_USAGE_MODE:-turn_excluding_history}
 
 MAX_TURN=${MAX_TURN:-1}
 MAX_CONTEXT_WINDOW_TOKENS=${MAX_CONTEXT_WINDOW_TOKENS:-2500}
@@ -128,7 +139,7 @@ DRY_RUN=${DRY_RUN:-0}
 
 DEFAULT_RESULT_INPUT_JSON="$PROJECT_ROOT/results/estimation/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
 DEFAULT_BENCHMARK_INPUT_JSON="$PROJECT_ROOT/results/budget-estimation-benchmark/sokoban-origin-gpt5.2-instant-128-window=1-max-turn=6/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
-DEFAULT_DATABASE_INPUT_JSON="/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
+DEFAULT_DATABASE_INPUT_JSON="${HOME}/database/origin/sokoban-origin-openai-openai-5-2-codex-low-thinking-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json"
 if [[ -z "${INPUT_JSON:-}" ]]; then
   if [[ -f "$DEFAULT_RESULT_INPUT_JSON" ]]; then
     INPUT_JSON="$DEFAULT_RESULT_INPUT_JSON"
@@ -166,12 +177,25 @@ CMD=(
   --max-concurrency "$MAX_CONCURRENCY"
   --request-batch-size "$REQUEST_BATCH_SIZE"
   --max-tokens "$MAX_TOKENS"
-  --temperature "$TEMPERATURE"
   --max-turn "$MAX_TURN"
   --max-context-window-tokens "$MAX_CONTEXT_WINDOW_TOKENS"
+  --turn-usage-mode "$TURN_USAGE_MODE"
   --system-prompt-file "$SYSTEM_PROMPT_FILE"
   --user-prompt-file "$USER_PROMPT_FILE"
 )
+
+SHOULD_PASS_TEMPERATURE=1
+if [[ "$PROVIDER" == "openai" ]]; then
+  case "$MODEL_NAME" in
+    gpt-5*|o*)
+      SHOULD_PASS_TEMPERATURE=0
+      ;;
+  esac
+fi
+
+if [[ "$SHOULD_PASS_TEMPERATURE" == "1" && -n "${TEMPERATURE:-}" ]]; then
+  CMD+=(--temperature "$TEMPERATURE")
+fi
 
 if [[ -n "$REASONING_EFFORT" ]]; then
   CMD+=(--reasoning-effort "$REASONING_EFFORT")

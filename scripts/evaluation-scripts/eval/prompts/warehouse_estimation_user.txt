@@ -19,6 +19,6 @@ Now, estimate:
 4. Prioritize the can-finish judgment over interval tightness. If you think the rollout can finish within budget, make each interval as tight as possible while still covering the true remaining value.
 
 Output exactly one of the following:
-<think>[YOUR THINKING]</think><answer>time_weeks:[est_low, est_high], warehouse_item_weeks:[est_low, est_high], cumulative_cost_usd:[est_low, est_high]</answer>
+<think>[YOUR THINKING, less than 300 tokens, typically 1-3 sentences]</think><answer>time_weeks:[est_low, est_high], warehouse_item_weeks:[est_low, est_high], cumulative_cost_usd:[est_low, est_high]</answer>
 or
-<think>[YOUR THINKING]</think><answer>impossible</answer>
+<think>[YOUR THINKING, less than 300 tokens, typically 1-3 sentences]</think><answer>impossible</answer>

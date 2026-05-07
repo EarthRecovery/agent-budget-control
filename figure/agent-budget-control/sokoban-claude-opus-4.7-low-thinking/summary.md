@@ -14,5 +14,5 @@
 - Rollout cached-input share: 0.000
 - Estimation cached-input share: 0.000
 
-- Rollout source: `/u/ylin30/database/origin/sokoban-origin-claude-opus-4.7-low-thinking-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json`
-- Estimation source: `/u/ylin30/database/estimation/sokoban-origin-claude-opus-4.7-low-thinking-128-main_origin-claude-opus-4.7-low-thinking-token-estimation-main/sokoban-origin-claude-opus-4.7-low-thinking-128-main_origin-claude-opus-4.7-low-thinking-token-estimation-main.json`
+- Rollout source: `${HOME}/database/origin/sokoban-origin-claude-opus-4.7-low-thinking-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json`
+- Estimation source: `${HOME}/database/estimation/sokoban-origin-claude-opus-4.7-low-thinking-128-main_origin-claude-opus-4.7-low-thinking-token-estimation-main/sokoban-origin-claude-opus-4.7-low-thinking-128-main_origin-claude-opus-4.7-low-thinking-token-estimation-main.json`

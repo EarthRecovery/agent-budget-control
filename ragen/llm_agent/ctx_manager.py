@@ -1,6 +1,5 @@
 """
 This is the context manager for the LLM agent.
-author: Kangrui Wang, Zihan Wang
 date: 2025-03-30
 """
 from itertools import zip_longest

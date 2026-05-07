@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 
-ROOT = Path("/u/ylin30")
+ROOT = Path.home()
 FIGURE_ROOT = ROOT / "figure/agent-budget-control"
 OVERALL_DIR = FIGURE_ROOT / "overall"
 DATABASE_ORIGIN_ROOT = ROOT / "database/origin"
@@ -33,6 +33,7 @@ class DatasetConfig:
     estimation_path: Path
     progress_bins: int
     reward_mode: str
+    table_kind: str = "token"
 
     @property
     def out_dir(self) -> Path:
@@ -116,6 +117,72 @@ CONFIGS = [
     ),
 ]
 
+OVERALL_ONLY_CONFIGS = [
+    DatasetConfig(
+        slug="sokoban-gemini-3.1-pro-preview",
+        task="sokoban",
+        task_display="Sokoban",
+        model_display="Gemini 3.1 Pro Preview",
+        rollout_path=ROOT / "database/origin/sokoban-origin-gemini-3.1-pro-preview-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json",
+        estimation_path=ROOT / "database/estimation/sokoban-origin-gemini-3.1-pro-preview-128-main_gemini-3.1-pro-preview-token-estimation-main/sokoban-origin-gemini-3.1-pro-preview-128-main_gemini-3.1-pro-preview-token-estimation-main.json",
+        progress_bins=10,
+        reward_mode="sokoban_custom",
+    ),
+    DatasetConfig(
+        slug="sokoban-qwen3-235b",
+        task="sokoban",
+        task_display="Sokoban",
+        model_display="Qwen3 235B",
+        rollout_path=ROOT / "database/origin/sokoban-origin-qwen-qwen3-235b-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json",
+        estimation_path=ROOT / "database/estimation/sokoban-origin-qwen-qwen3-235b-128-main_origin-qwen-qwen3-235b-128-main-token-estimation-main/sokoban-origin-qwen-qwen3-235b-128-main_origin-qwen-qwen3-235b-128-main-token-estimation-main.json",
+        progress_bins=10,
+        reward_mode="sokoban_custom",
+    ),
+    DatasetConfig(
+        slug="warehouse-gpt5.2instant",
+        task="warehouse",
+        task_display="Warehouse",
+        model_display="GPT-5.2 Instant",
+        rollout_path=ROOT / "database/origin/warehouse-origin-gpt5.2-instant-128-main/combined_gpt5.2-chat-latest_128seeds.json",
+        estimation_path=ROOT / "database/estimation/warehouse-OpenAI-5.2-Instant_OpenAI-5.2-Instant-128-main/warehouse-OpenAI-5.2-Instant_OpenAI-5.2-Instant-128-main.json",
+        progress_bins=10,
+        reward_mode="stored",
+        table_kind="warehouse",
+    ),
+    DatasetConfig(
+        slug="warehouse-claude-opus-4.7-low-thinking",
+        task="warehouse",
+        task_display="Warehouse",
+        model_display="Claude Opus 4.7 Low Thinking",
+        rollout_path=ROOT / "database/origin/warehouse-origin-claude-opus-4.7-low-thinking-128-main/combined_opus4.7-low_128seeds.json",
+        estimation_path=ROOT / "database/estimation/warehouse-Claude-Opus-4.7-low-thinking_Claude-Opus-4.7-low-thinking-main/warehouse-Claude-Opus-4.7-low-thinking_Claude-Opus-4.7-low-thinking-main.json",
+        progress_bins=10,
+        reward_mode="stored",
+        table_kind="warehouse",
+    ),
+    DatasetConfig(
+        slug="warehouse-claude-sonnet-4.6-low-thinking",
+        task="warehouse",
+        task_display="Warehouse",
+        model_display="Claude Sonnet 4.6 Low Thinking",
+        rollout_path=ROOT / "database/origin/warehouse-origin-claude-sonnet-4.6-128-main/combined_sonnet4.6-low_128seeds.json",
+        estimation_path=ROOT / "database/estimation/warehouse-Claude-Sonnet-4.6-low-thinking_Claude-Sonnet-4.6-low-thinking-main/warehouse-Claude-Sonnet-4.6-low-thinking_Claude-Sonnet-4.6-low-thinking-main.json",
+        progress_bins=10,
+        reward_mode="stored",
+        table_kind="warehouse",
+    ),
+    DatasetConfig(
+        slug="swebench-sera8b",
+        task="swebench",
+        task_display="SWE-bench",
+        model_display="SERA 8B",
+        rollout_path=ROOT / "database/origin/swe-banch-origin-sera8b-128-main/results_128_v2_dialogues_incremental.json",
+        estimation_path=ROOT / "database/estimation/swebanch-origin-sera7b-128-main/swebanch-token-estimation-main.json",
+        progress_bins=10,
+        reward_mode="stored",
+    ),
+]
+
 CONFIG_BY_SLUG = {cfg.slug: cfg for cfg in CONFIGS}
 
 
@@ -128,7 +195,7 @@ def is_overall_config(cfg: DatasetConfig) -> bool:
     return True
 
 
-OVERALL_CONFIGS = [cfg for cfg in CONFIGS if is_overall_config(cfg)]
+OVERALL_CONFIGS = [cfg for cfg in CONFIGS if is_overall_config(cfg)] + OVERALL_ONLY_CONFIGS
 
 
 plt.style.use("seaborn-v0_8-whitegrid")
@@ -148,6 +215,101 @@ plt.rcParams.update(
 
 def load_json(path: Path):
     return json.loads(path.read_text())
+
+
+STREAM_CHUNK_SIZE = 1 << 20
+
+
+def _read_more(fp, buffer: str, pos: int) -> tuple[str, int, bool]:
+    chunk = fp.read(STREAM_CHUNK_SIZE)
+    if not chunk:
+        return buffer, pos, False
+    if pos:
+        buffer = buffer[pos:]
+        pos = 0
+    buffer += chunk
+    return buffer, pos, True
+
+
+def _skip_json_chars(fp, buffer: str, pos: int, *, allow_commas: bool) -> tuple[str, int]:
+    chars = " \r\n\t," if allow_commas else " \r\n\t"
+    while True:
+        while pos < len(buffer) and buffer[pos] in chars:
+            pos += 1
+        if pos < len(buffer):
+            return buffer, pos
+        buffer, pos, has_more = _read_more(fp, buffer, pos)
+        if not has_more:
+            return buffer, pos
+
+
+def _decode_json_value(decoder: json.JSONDecoder, fp, buffer: str, pos: int):
+    while True:
+        try:
+            value, end = decoder.raw_decode(buffer, pos)
+            return value, end, buffer
+        except json.JSONDecodeError as exc:
+            buffer, pos, has_more = _read_more(fp, buffer, pos)
+            if not has_more:
+                raise exc
+
+
+def iter_top_level_array(path: Path):
+    decoder = json.JSONDecoder()
+    with path.open("r", encoding="utf-8") as fp:
+        buffer = ""
+        pos = 0
+        buffer, pos = _skip_json_chars(fp, buffer, pos, allow_commas=False)
+        if pos >= len(buffer) or buffer[pos] != "[":
+            raise ValueError(f"Expected top-level array in {path}")
+        pos += 1
+        while True:
+            buffer, pos = _skip_json_chars(fp, buffer, pos, allow_commas=True)
+            if pos >= len(buffer) or buffer[pos] == "]":
+                return
+            item, pos, buffer = _decode_json_value(decoder, fp, buffer, pos)
+            yield item
+
+
+def iter_named_array_items(path: Path, array_key: str):
+    decoder = json.JSONDecoder()
+    with path.open("r", encoding="utf-8") as fp:
+        buffer = ""
+        pos = 0
+        buffer, pos = _skip_json_chars(fp, buffer, pos, allow_commas=False)
+        if pos >= len(buffer) or buffer[pos] != "{":
+            raise ValueError(f"Expected top-level object in {path}")
+        pos += 1
+
+        while True:
+            buffer, pos = _skip_json_chars(fp, buffer, pos, allow_commas=True)
+            if pos >= len(buffer):
+                raise ValueError(f"Could not find key {array_key!r} in {path}")
+            if buffer[pos] == "}":
+                raise ValueError(f"Could not find key {array_key!r} in {path}")
+
+            key, pos, buffer = _decode_json_value(decoder, fp, buffer, pos)
+            if not isinstance(key, str):
+                raise ValueError(f"Expected string key in {path}")
+
+            buffer, pos = _skip_json_chars(fp, buffer, pos, allow_commas=False)
+            if pos >= len(buffer) or buffer[pos] != ":":
+                raise ValueError(f"Malformed JSON near key {key!r} in {path}")
+            pos += 1
+            buffer, pos = _skip_json_chars(fp, buffer, pos, allow_commas=False)
+
+            if key == array_key:
+                if pos >= len(buffer) or buffer[pos] != "[":
+                    raise ValueError(f"Expected array at key {array_key!r} in {path}")
+                pos += 1
+                while True:
+                    buffer, pos = _skip_json_chars(fp, buffer, pos, allow_commas=True)
+                    if pos >= len(buffer) or buffer[pos] == "]":
+                        return
+                    item, pos, buffer = _decode_json_value(decoder, fp, buffer, pos)
+                    yield item
+            else:
+                _, pos, buffer = _decode_json_value(decoder, fp, buffer, pos)
 
 
 def save(fig: plt.Figure, out_dir: Path, name: str) -> None:
@@ -236,6 +398,8 @@ def extract_turn_output_tokens(turn: dict) -> float:
 
 
 def resolve_rollout_success(rollout: dict) -> bool:
+    if rollout.get("success") is not None:
+        return bool(rollout.get("success"))
     turns = rollout.get("turns") or []
     if turns and turns[-1].get("success") is not None:
         return bool(turns[-1].get("success"))
@@ -404,6 +568,172 @@ def build_estimation_df(
     df["custom_reward"] = df.apply(compute_custom_reward, axis=1)
     df["progress_bin"] = make_progress_bins(df["relative_progress"], bin_labels, bin_edges)
     return df
+
+
+def safe_mean(total: float, count: int) -> float:
+    return float(total) / float(count) if count else np.nan
+
+
+def bool_score(value) -> Optional[float]:
+    if value is True:
+        return 1.0
+    if value is False:
+        return 0.0
+    return None
+
+
+def to_float_or_nan(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return math.nan
+
+
+def compute_token_custom_reward_from_result(result: dict) -> float:
+    ground_truth = result.get("ground_truth") or {}
+    prediction = result.get("prediction") or {}
+    actual_can_finish = bool(ground_truth.get("actual_can_finish"))
+    pred_is_impossible = bool(prediction.get("is_impossible", False))
+    if actual_can_finish:
+        interval = prediction.get("remaining_token_interval") or [math.nan, math.nan]
+        pred_low = to_float_or_nan(interval[0] if len(interval) > 0 else math.nan)
+        pred_high = to_float_or_nan(interval[1] if len(interval) > 1 else math.nan)
+        actual = to_float_or_nan(ground_truth.get("actual_remaining_total_tokens"))
+        if math.isnan(pred_low) or math.isnan(pred_high) or math.isnan(actual) or actual <= 0:
+            return 0.0
+        if pred_low <= actual <= pred_high:
+            width = max(0.0, pred_high - pred_low)
+            return max(0.0, 1.0 - (width / actual))
+        return 0.0
+    return 1.0 if pred_is_impossible else 0.0
+
+
+def summarize_rollouts(path: Path) -> tuple[int, float, float]:
+    rollout_count = 0
+    success_sum = 0.0
+    total_turns_sum = 0.0
+    for rollout in iter_top_level_array(path):
+        rollout_count += 1
+        success_sum += 1.0 if resolve_rollout_success(rollout) else 0.0
+        turns = rollout.get("turns") or []
+        total_turns_sum += float(rollout.get("total_turns", len(turns)))
+    return rollout_count, success_sum, total_turns_sum
+
+
+def compute_token_table1_row(cfg: DatasetConfig) -> dict:
+    rollout_count, rollout_success_sum, rollout_turns_sum = summarize_rollouts(cfg.rollout_path)
+
+    first_turn_correct_sum = 0.0
+    first_turn_correct_count = 0
+    estimation_total = 0
+    estimation_success_rollouts = 0
+    estimation_fail_rollouts = 0
+    pred_hit_success_sum = 0.0
+    pred_hit_success_count = 0
+    pred_hit_fail_sum = 0.0
+    pred_hit_fail_count = 0
+    success_interval_hit_sum = 0.0
+    success_rollout_count = 0
+    success_reward_sum = 0.0
+
+    for result in iter_named_array_items(cfg.estimation_path, "results"):
+        estimation_total += 1
+        ground_truth = result.get("ground_truth") or {}
+        metrics = result.get("metrics") or {}
+        rollout_success = bool(ground_truth.get("rollout_success"))
+        can_finish_score = bool_score(metrics.get("can_finish_correct"))
+
+        if int(result.get("turn_idx", 0) or 0) == 1 and can_finish_score is not None:
+            first_turn_correct_sum += can_finish_score
+            first_turn_correct_count += 1
+
+        if rollout_success:
+            estimation_success_rollouts += 1
+            success_rollout_count += 1
+            if can_finish_score is not None:
+                pred_hit_success_sum += can_finish_score
+                pred_hit_success_count += 1
+            success_interval_hit_sum += 1.0 if metrics.get("remaining_token_interval_contains_actual") is True else 0.0
+            success_reward_sum += compute_token_custom_reward_from_result(result)
+        else:
+            estimation_fail_rollouts += 1
+            if can_finish_score is not None:
+                pred_hit_fail_sum += can_finish_score
+                pred_hit_fail_count += 1
+
+    return {
+        "benchmark": cfg.task_display,
+        "model": cfg.model_display,
+        "slug": cfg.slug,
+        "rollout_success_rate": safe_mean(rollout_success_sum, rollout_count),
+        "rollout_avg_turns": safe_mean(rollout_turns_sum, rollout_count),
+        "first_turn_success_pred_acc": safe_mean(first_turn_correct_sum, first_turn_correct_count),
+        "estimation_total": estimation_total,
+        "estimation_success_rollouts": estimation_success_rollouts,
+        "estimation_fail_rollouts": estimation_fail_rollouts,
+        "pred_hit_success_rollouts": safe_mean(pred_hit_success_sum, pred_hit_success_count),
+        "pred_hit_fail_rollouts": safe_mean(pred_hit_fail_sum, pred_hit_fail_count),
+        "success_rollout_interval_hit_rate": safe_mean(success_interval_hit_sum, success_rollout_count),
+        "success_rollout_custom_reward": safe_mean(success_reward_sum, success_rollout_count),
+    }
+
+
+def compute_warehouse_table1_row(cfg: DatasetConfig) -> dict:
+    rollout_count, rollout_success_sum, rollout_turns_sum = summarize_rollouts(cfg.rollout_path)
+
+    first_turn_correct_sum = 0.0
+    first_turn_correct_count = 0
+    estimation_total = 0
+    estimation_success_rollouts = 0
+    estimation_fail_rollouts = 0
+    pred_hit_success_sum = 0.0
+    pred_hit_success_count = 0
+    pred_hit_fail_sum = 0.0
+    pred_hit_fail_count = 0
+    success_interval_hit_sum = 0.0
+    success_rollout_count = 0
+    success_reward_sum = 0.0
+
+    for result in iter_named_array_items(cfg.estimation_path, "results"):
+        estimation_total += 1
+        ground_truth = result.get("ground_truth") or {}
+        metrics = result.get("metrics") or {}
+        rollout_success = bool(ground_truth.get("rollout_success"))
+        can_finish_score = bool_score(metrics.get("can_finish_correct"))
+
+        if int(result.get("turn_idx", 0) or 0) == 1 and can_finish_score is not None:
+            first_turn_correct_sum += can_finish_score
+            first_turn_correct_count += 1
+
+        if rollout_success:
+            estimation_success_rollouts += 1
+            success_rollout_count += 1
+            if can_finish_score is not None:
+                pred_hit_success_sum += can_finish_score
+                pred_hit_success_count += 1
+            success_interval_hit_sum += 1.0 if metrics.get("all_intervals_cover_actual") is True else 0.0
+            success_reward_sum += float(metrics.get("reward", 0.0) or 0.0)
+        else:
+            estimation_fail_rollouts += 1
+            if can_finish_score is not None:
+                pred_hit_fail_sum += can_finish_score
+                pred_hit_fail_count += 1
+
+    return {
+        "benchmark": cfg.task_display,
+        "model": cfg.model_display,
+        "slug": cfg.slug,
+        "rollout_success_rate": safe_mean(rollout_success_sum, rollout_count),
+        "rollout_avg_turns": safe_mean(rollout_turns_sum, rollout_count),
+        "first_turn_success_pred_acc": safe_mean(first_turn_correct_sum, first_turn_correct_count),
+        "estimation_total": estimation_total,
+        "estimation_success_rollouts": estimation_success_rollouts,
+        "estimation_fail_rollouts": estimation_fail_rollouts,
+        "pred_hit_success_rollouts": safe_mean(pred_hit_success_sum, pred_hit_success_count),
+        "pred_hit_fail_rollouts": safe_mean(pred_hit_fail_sum, pred_hit_fail_count),
+        "success_rollout_interval_hit_rate": safe_mean(success_interval_hit_sum, success_rollout_count),
+        "success_rollout_custom_reward": safe_mean(success_reward_sum, success_rollout_count),
+    }
 
 
 def by_bin_mean(df: pd.DataFrame, value_col: str, output_col: str, bin_labels: list[str]) -> pd.DataFrame:
@@ -684,7 +1014,7 @@ def write_combined_index(configs: list[DatasetConfig]) -> None:
     for cfg in configs:
         lines.append(f"- [{cfg.task_display} | {cfg.model_display}]({cfg.slug}/summary.md)")
     lines.append("")
-    lines.append("Each folder contains `figure1` to `figure7` and a `summary.md` generated from `/u/ylin30/database/estimation` and the matching rollout source in `/u/ylin30/database/origin`.")
+    lines.append("Each folder contains `figure1` to `figure7` and a `summary.md` generated from `${HOME}/database/estimation` and the matching rollout source in `${HOME}/database/origin`.")
     (FIGURE_ROOT / "combined-figures.md").write_text("\n".join(lines) + "\n")
 
 
@@ -703,36 +1033,7 @@ def format_float(value: float, digits: int = 2) -> str:
 def compute_table1_rows(configs: list[DatasetConfig]) -> list[dict]:
     rows = []
     for cfg in configs:
-        bin_edges = np.linspace(0.0, 1.0, cfg.progress_bins + 1)
-        bin_labels = [f"{idx / cfg.progress_bins:.1f}-{(idx + 1) / cfg.progress_bins:.1f}" for idx in range(cfg.progress_bins)]
-        reward_fn = compute_sokoban_reward if cfg.reward_mode == "sokoban_custom" else None
-        rollout_df = build_rollout_df(load_json(cfg.rollout_path))
-        est_df = build_estimation_df(load_json(cfg.estimation_path), bin_labels, bin_edges, reward_fn)
-
-        first_turn = est_df[est_df["turn_idx"] == 1]
-        success_est = est_df[est_df["rollout_success"]]
-        fail_est = est_df[~est_df["rollout_success"]]
-
-        success_interval_hit_rate = (
-            success_est["contains_actual"].fillna(False).astype(bool).mean()
-            if len(success_est)
-            else np.nan
-        )
-        row = {
-            "benchmark": cfg.task_display,
-            "model": cfg.model_display,
-            "slug": cfg.slug,
-            "rollout_success_rate": rollout_df["success"].mean(),
-            "rollout_avg_turns": rollout_df["total_turns"].mean(),
-            "first_turn_success_pred_acc": first_turn["can_finish_correct"].mean() if len(first_turn) else np.nan,
-            "estimation_total": len(est_df),
-            "estimation_success_rollouts": int(success_est.shape[0]),
-            "estimation_fail_rollouts": int(fail_est.shape[0]),
-            "pred_hit_success_rollouts": success_est["can_finish_correct"].mean() if len(success_est) else np.nan,
-            "pred_hit_fail_rollouts": fail_est["can_finish_correct"].mean() if len(fail_est) else np.nan,
-            "success_rollout_interval_hit_rate": success_interval_hit_rate,
-            "success_rollout_custom_reward": success_est["custom_reward"].mean() if len(success_est) else np.nan,
-        }
+        row = compute_warehouse_table1_row(cfg) if cfg.table_kind == "warehouse" else compute_token_table1_row(cfg)
         rows.append(row)
     return rows
 
@@ -789,8 +1090,8 @@ def write_table1(configs: list[DatasetConfig]) -> None:
             "Columns:",
             "- `Estimations (Succ/Fail Rollouts)` means total estimation samples, followed by counts from successful and failed rollouts.",
             "- `Pred Hit on Success/Fail Rollouts` is the mean of `can_finish_correct` over all estimation samples in that rollout group.",
-            "- `Success-Rollout Interval Hit` counts a success-rollout sample as a hit only when the predicted interval contains the actual remaining token target; missing intervals count as misses.",
-            "- `Success-Rollout Reward` uses the custom score requested in `figure-plan.md`, averaged over success-rollout estimation samples.",
+            "- `Success-Rollout Interval Hit` uses token-interval coverage for SearchR1, Sokoban, and SWE-bench; for Warehouse it uses `all_intervals_cover_actual` across time, warehouse-item-weeks, and cost.",
+            "- `Success-Rollout Reward` uses the token-based custom score from `figure-plan.md` for SearchR1, Sokoban, and SWE-bench; for Warehouse it uses the stored multi-resource reward from the estimation metrics.",
         ]
     )
 
@@ -860,18 +1161,19 @@ def render_table1_figure(df: pd.DataFrame, best_indices: dict[str, set[int]]) ->
     cell_text = display_df[columns].values.tolist()
 
     fig_height = 1.6 + 0.55 * len(cell_text)
-    fig, ax = plt.subplots(figsize=(19, fig_height))
+    fig, ax = plt.subplots(figsize=(21, fig_height))
     ax.axis("off")
     table = ax.table(
         cellText=cell_text,
         colLabels=headers,
+        colWidths=[0.09, 0.22, 0.08, 0.07, 0.11, 0.12, 0.09, 0.09, 0.08, 0.05],
         cellLoc="center",
         colLoc="center",
         loc="center",
         bbox=[0, 0, 1, 1],
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
+    table.set_fontsize(9.5)
     table.scale(1, 1.35)
 
     header_color = "#dbeafe"

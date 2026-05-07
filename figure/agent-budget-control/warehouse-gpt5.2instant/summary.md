@@ -16,5 +16,5 @@
 - Cost coverage rate (strict): 0.190
 - All-interval coverage rate (strict): 0.142
 
-- Rollout source: `/u/ylin30/database/origin/warehouse-origin-gpt5.2-instant-128-main/combined_gpt5.2-chat-latest_128seeds.json`
-- Estimation source: `/u/ylin30/database/estimation/warehouse-OpenAI-5.2-Instant_OpenAI-5.2-Instant-128-main/warehouse-OpenAI-5.2-Instant_OpenAI-5.2-Instant-128-main.json`
+- Rollout source: `${HOME}/database/origin/warehouse-origin-gpt5.2-instant-128-main/combined_gpt5.2-chat-latest_128seeds.json`
+- Estimation source: `${HOME}/database/estimation/warehouse-OpenAI-5.2-Instant_OpenAI-5.2-Instant-128-main/warehouse-OpenAI-5.2-Instant_OpenAI-5.2-Instant-128-main.json`

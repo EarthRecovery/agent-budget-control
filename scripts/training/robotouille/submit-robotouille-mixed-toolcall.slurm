@@ -8,12 +8,12 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120G
 #SBATCH --time=36:00:00
-#SBATCH --output=/u/ylin30/agent-budget-control/logs/slurm/robotouille-mixed-toolcall-%j.out
-#SBATCH --error=/u/ylin30/agent-budget-control/logs/slurm/robotouille-mixed-toolcall-%j.err
+#SBATCH --output=logs/slurm/robotouille-mixed-toolcall-%j.out
+#SBATCH --error=logs/slurm/robotouille-mixed-toolcall-%j.err
 
 set -euo pipefail
 
-REPO_ROOT="/u/ylin30/agent-budget-control"
+REPO_ROOT="${HOME}/agent-budget-control"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-ragenv2}"
 WANDB_MODE="${WANDB_MODE:-online}"
 WANDB_KEY_FILE="${WANDB_KEY_FILE:-$HOME/.config/wandb/api_key}"

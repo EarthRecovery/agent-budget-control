@@ -9,4 +9,4 @@
 - [Sokoban | Claude Opus 4.7 Low Thinking](sokoban-claude-opus-4.7-low-thinking/summary.md)
 - [Sokoban | Claude Sonnet 4.6 Low Thinking](sokoban-claude-sonnet-4.6-low-thinking/summary.md)
 
-Each folder contains `figure1` to `figure7` and a `summary.md` generated from `/u/ylin30/database/estimation` and the matching rollout source in `/u/ylin30/database/origin`.
+Each folder contains `figure1` to `figure7` and a `summary.md` generated from `${HOME}/database/estimation` and the matching rollout source in `${HOME}/database/origin`.

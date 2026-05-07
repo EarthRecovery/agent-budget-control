@@ -1,4 +1,4 @@
-; See https://github.com/tomsilver/pddlgym/issues/73
+; See the PDDLGym issue about probabilistic-domain parsing.
 
 (define (domain tireworld)
   (:requirements :typing :strips :probabilistic-effects)

@@ -204,8 +204,8 @@ def main() -> None:
     parser.add_argument(
         "--turn-usage-mode",
         choices=["request", "turn_excluding_history"],
-        default="request",
-        help="How to interpret per-turn usage exposed to the estimator",
+        default="turn_excluding_history",
+        help="How to interpret per-turn usage exposed to the estimator; default excludes replayed history",
     )
     parser.add_argument("--system-prompt-file", default=None, help="Optional txt file to override system prompt template")
     parser.add_argument("--user-prompt-file", default=None, help="Optional txt file to override user prompt template")

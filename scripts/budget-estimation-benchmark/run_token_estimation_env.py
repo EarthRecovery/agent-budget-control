@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import random
 import sys
 from typing import Any, Dict, List, Optional
 from tqdm.auto import tqdm
@@ -108,6 +109,272 @@ def _ensure_parent_dir(path: str) -> None:
         os.makedirs(parent, exist_ok=True)
 
 
+def _build_temp_record(env: TokenEstimationEnv, sample: Any) -> Dict[str, Any]:
+    api_messages = env.build_api_messages(sample)
+    record = {
+        "sample_id": sample.sample_id,
+        "rollout_index": sample.rollout_index,
+        "turn_idx": sample.turn_idx,
+        "input_messages": api_messages,
+        "rollout_history_messages": sample.input_messages,
+        "input_text": json.dumps(api_messages, ensure_ascii=False, indent=2),
+        "estimation_user_prompt": env.build_user_prompt(sample),
+        "output": sample.target_output,
+        "source_system": sample.source_system,
+        "completed_turns": sample.completed_turns,
+        "total_turns": sample.total_turns,
+        "relative_progress": sample.relative_progress,
+        "completed_turn_token_usage": sample.completed_turn_token_usage,
+        "completed_turn_token_usage_details": sample.completed_turn_token_usage_details,
+        "actual_tokens_used_so_far": sample.actual_tokens_used_so_far,
+        "actual_can_finish": sample.actual_can_finish,
+        "actual_remaining_total_tokens": sample.actual_remaining_total_tokens,
+    }
+    if sample.completed_turn_request_token_usage is not None:
+        record["completed_turn_request_token_usage"] = sample.completed_turn_request_token_usage
+    if sample.completed_turn_request_token_usage_details is not None:
+        record["completed_turn_request_token_usage_details"] = (
+            sample.completed_turn_request_token_usage_details
+        )
+    return record
+
+
+def _export_temp_pairs(
+    env: TokenEstimationEnv,
+    path: str,
+    sample_indices: List[int],
+) -> str:
+    _ensure_parent_dir(path)
+    payload = []
+    for sample_index in sample_indices:
+        sample = env.get_sample(int(sample_index))
+        payload.append(_build_temp_record(env, sample))
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    return path
+
+
+def _build_rollout_length_buckets(
+    samples: List[Any],
+    num_bins: int,
+) -> tuple[Dict[int, int], List[Dict[str, Any]]]:
+    rollout_to_total_turns: Dict[int, int] = {}
+    for sample in samples:
+        rollout_index = int(sample.rollout_index)
+        rollout_to_total_turns.setdefault(rollout_index, int(sample.total_turns))
+
+    sorted_rollouts = sorted(
+        rollout_to_total_turns.items(),
+        key=lambda item: (int(item[1]), int(item[0])),
+    )
+    if not sorted_rollouts:
+        return {}, []
+
+    normalized_num_bins = max(1, min(int(num_bins), len(sorted_rollouts)))
+    base_size, remainder = divmod(len(sorted_rollouts), normalized_num_bins)
+
+    rollout_to_bucket: Dict[int, int] = {}
+    bucket_stats: List[Dict[str, Any]] = []
+    start = 0
+    for bucket_id in range(normalized_num_bins):
+        bucket_size = base_size + (1 if bucket_id < remainder else 0)
+        if bucket_size <= 0:
+            continue
+        chunk = sorted_rollouts[start:start + bucket_size]
+        start += bucket_size
+        if not chunk:
+            continue
+        rollout_indices = [int(rollout_index) for rollout_index, _ in chunk]
+        for rollout_index in rollout_indices:
+            rollout_to_bucket[rollout_index] = int(bucket_id)
+        bucket_stats.append(
+            {
+                "bucket_id": int(bucket_id),
+                "rollout_count": len(chunk),
+                "min_total_turns": int(chunk[0][1]),
+                "max_total_turns": int(chunk[-1][1]),
+                "rollout_indices": rollout_indices,
+            }
+        )
+    return rollout_to_bucket, bucket_stats
+
+
+def _select_fair_split_random_indices(
+    samples: List[Any],
+    max_samples: int,
+    seed: int,
+    length_bins: int,
+) -> tuple[List[int], List[Dict[str, Any]]]:
+    if max_samples <= 0 or not samples:
+        return [], []
+
+    rng = random.Random(int(seed))
+    rollout_to_indices: Dict[int, List[int]] = {}
+    for sample_index, sample in enumerate(samples):
+        rollout_to_indices.setdefault(int(sample.rollout_index), []).append(int(sample_index))
+
+    for indices in rollout_to_indices.values():
+        rng.shuffle(indices)
+
+    rollout_to_bucket, bucket_stats = _build_rollout_length_buckets(samples, num_bins=length_bins)
+    bucket_to_rollouts: Dict[int, List[int]] = {}
+    for rollout_index in rollout_to_indices:
+        bucket_id = int(rollout_to_bucket.get(int(rollout_index), 0))
+        bucket_to_rollouts.setdefault(bucket_id, []).append(int(rollout_index))
+    for rollout_indices in bucket_to_rollouts.values():
+        rng.shuffle(rollout_indices)
+
+    rollout_cursors = {int(rollout_index): 0 for rollout_index in rollout_to_indices}
+    bucket_pointers = {int(bucket_id): 0 for bucket_id in bucket_to_rollouts}
+    selected_indices: List[int] = []
+    active_bucket_ids = list(bucket_to_rollouts)
+
+    while len(selected_indices) < int(max_samples) and active_bucket_ids:
+        current_bucket_ids = list(active_bucket_ids)
+        rng.shuffle(current_bucket_ids)
+        progressed = False
+        next_active_bucket_ids: List[int] = []
+
+        for bucket_id in current_bucket_ids:
+            rollout_indices = bucket_to_rollouts.get(int(bucket_id), [])
+            if not rollout_indices:
+                continue
+
+            selected_in_bucket = False
+            rollout_count = len(rollout_indices)
+            for _ in range(rollout_count):
+                pointer = int(bucket_pointers[int(bucket_id)] % rollout_count)
+                rollout_index = int(rollout_indices[pointer])
+                bucket_pointers[int(bucket_id)] = int((pointer + 1) % rollout_count)
+                rollout_cursor = int(rollout_cursors[rollout_index])
+                rollout_sample_indices = rollout_to_indices[rollout_index]
+                if rollout_cursor >= len(rollout_sample_indices):
+                    continue
+                selected_indices.append(int(rollout_sample_indices[rollout_cursor]))
+                rollout_cursors[rollout_index] = int(rollout_cursor + 1)
+                progressed = True
+                selected_in_bucket = True
+                break
+
+            bucket_has_remaining = any(
+                int(rollout_cursors[int(rollout_index)]) < len(rollout_to_indices[int(rollout_index)])
+                for rollout_index in rollout_indices
+            )
+            if bucket_has_remaining:
+                next_active_bucket_ids.append(int(bucket_id))
+            if len(selected_indices) >= int(max_samples):
+                break
+            if not selected_in_bucket and not bucket_has_remaining:
+                continue
+
+        active_bucket_ids = next_active_bucket_ids
+        if not progressed:
+            break
+
+    if len(selected_indices) < int(max_samples):
+        selected_set = set(int(index) for index in selected_indices)
+        remaining_indices = [
+            int(index)
+            for index in range(len(samples))
+            if int(index) not in selected_set
+        ]
+        rng.shuffle(remaining_indices)
+        selected_indices.extend(remaining_indices[: max(0, int(max_samples) - len(selected_indices))])
+
+    return selected_indices[: int(max_samples)], bucket_stats
+
+
+def _select_sample_indices(
+    samples: List[Any],
+    *,
+    max_samples: Optional[int],
+    strategy: str,
+    seed: int,
+    length_bins: int,
+    cache_friendly_order: bool,
+) -> tuple[List[int], Dict[str, Any]]:
+    total_available_samples = len(samples)
+    requested_samples = total_available_samples if max_samples is None else max(0, int(max_samples))
+    capped_samples = min(int(requested_samples), int(total_available_samples))
+    selection_metadata: Dict[str, Any] = {
+        "strategy": str(strategy),
+        "seed": int(seed),
+        "requested_samples": int(requested_samples),
+        "total_available_samples": int(total_available_samples),
+        "cache_friendly_order": bool(cache_friendly_order),
+    }
+
+    if capped_samples <= 0:
+        return [], selection_metadata
+
+    if capped_samples >= total_available_samples:
+        selected_indices = list(range(total_available_samples))
+    elif strategy == "first":
+        selected_indices = list(range(capped_samples))
+    elif strategy == "random":
+        rng = random.Random(int(seed))
+        selected_indices = list(range(total_available_samples))
+        rng.shuffle(selected_indices)
+        selected_indices = selected_indices[:capped_samples]
+    elif strategy == "fair_split_random":
+        selected_indices, bucket_stats = _select_fair_split_random_indices(
+            samples,
+            max_samples=capped_samples,
+            seed=seed,
+            length_bins=length_bins,
+        )
+        selection_metadata["length_buckets"] = bucket_stats
+    else:
+        raise ValueError(f"Unsupported sample selection strategy: {strategy}")
+
+    if cache_friendly_order:
+        rollout_groups: Dict[int, List[int]] = {}
+        for sample_index in selected_indices:
+            rollout_groups.setdefault(
+                int(samples[int(sample_index)].rollout_index),
+                [],
+            ).append(int(sample_index))
+
+        normalized_groups: List[tuple[tuple[int, int, int, int], List[int]]] = []
+        for rollout_index, group_indices in rollout_groups.items():
+            ordered_group_indices = sorted(
+                group_indices,
+                key=lambda sample_index: (
+                    int(getattr(samples[int(sample_index)], "actual_tokens_used_so_far", 0) or 0),
+                    int(samples[int(sample_index)].turn_idx),
+                    int(sample_index),
+                ),
+            )
+            first_sample = samples[int(ordered_group_indices[0])]
+            first_history_tokens = int(getattr(first_sample, "actual_tokens_used_so_far", 0) or 0)
+            first_turn_idx = int(first_sample.turn_idx)
+            normalized_groups.append(
+                (
+                    (
+                        first_history_tokens,
+                        first_turn_idx,
+                        len(ordered_group_indices),
+                        int(rollout_index),
+                    ),
+                    ordered_group_indices,
+                )
+            )
+
+        normalized_groups.sort(key=lambda item: item[0])
+        selected_indices = [
+            sample_index
+            for _, ordered_group_indices in normalized_groups
+            for sample_index in ordered_group_indices
+        ]
+        selection_metadata["cache_order_strategy"] = "group_by_rollout_short_history_first"
+
+    selection_metadata["selected_samples"] = len(selected_indices)
+    selection_metadata["selected_rollouts"] = len(
+        {int(samples[int(sample_index)].rollout_index) for sample_index in selected_indices}
+    )
+    return selected_indices, selection_metadata
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run offline token estimation over *_eval_estimation_dialogues.json files."
@@ -121,15 +388,33 @@ def main() -> None:
     parser.add_argument("--max-concurrency", type=int, default=8, help="Concurrent requests")
     parser.add_argument("--request-batch-size", type=int, default=64, help="Batch size passed to ConcurrentLLM")
     parser.add_argument("--max-tokens", type=int, default=512, help="Max completion tokens per API call")
-    parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature")
+    parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature")
     parser.add_argument("--max-samples", type=int, default=None, help="Optional sample cap after flattening")
+    parser.add_argument(
+        "--sample-selection",
+        choices=["first", "random", "fair_split_random"],
+        default="first",
+        help="How to choose samples when --max-samples is smaller than the flattened split-rollout count",
+    )
+    parser.add_argument("--sample-selection-seed", type=int, default=0, help="Random seed for sample selection")
+    parser.add_argument(
+        "--sample-length-bins",
+        type=int,
+        default=8,
+        help="Number of rollout-length buckets for fair_split_random selection",
+    )
+    parser.add_argument(
+        "--cache-friendly-order",
+        action="store_true",
+        help="Execute selected samples grouped by rollout and turn to maximize prompt-cache reuse",
+    )
     parser.add_argument("--max-turn", type=int, default=5, help="Legacy rollout turn budget retained for compatibility")
     parser.add_argument("--max-context-window-tokens", type=int, default=81920, help="Total token budget used for can-finish evaluation")
     parser.add_argument(
         "--turn-usage-mode",
         choices=["request", "turn_excluding_history"],
-        default="request",
-        help="How to interpret per-turn usage exposed to the estimator",
+        default="turn_excluding_history",
+        help="How to interpret per-turn usage exposed to the estimator; default excludes replayed history",
     )
     parser.add_argument("--reasoning-effort", default=None, help="Optional reasoning_effort passed through to compatible models")
     parser.add_argument("--reasoning-enabled", type=_parse_bool_flag, default=None, help="Optional OpenRouter reasoning.enabled override")
@@ -150,13 +435,21 @@ def main() -> None:
     env_config = TokenEstimationEnvConfig(
         input_path=args.input_json,
         max_context_window_tokens=int(args.max_context_window_tokens),
-        max_instances=args.max_samples,
+        max_instances=None,
         include_source_system=not bool(args.disable_source_system),
         system_prompt_template=system_prompt_template or DEFAULT_SYSTEM_PROMPT_TEMPLATE,
         user_prompt_template=user_prompt_template or DEFAULT_USER_PROMPT_TEMPLATE,
         turn_usage_mode=str(args.turn_usage_mode),
     )
     env = TokenEstimationEnv(env_config)
+    sample_indices, selection_metadata = _select_sample_indices(
+        env.samples,
+        max_samples=args.max_samples,
+        strategy=str(args.sample_selection),
+        seed=int(args.sample_selection_seed),
+        length_bins=max(1, int(args.sample_length_bins)),
+        cache_friendly_order=bool(args.cache_friendly_order),
+    )
 
     temp_json_path = args.temp_json
     if not temp_json_path:
@@ -165,15 +458,16 @@ def main() -> None:
             os.path.dirname(args.output_json) or ".",
             f"{input_stem}_turn_pairs.json",
         )
-    _ensure_parent_dir(temp_json_path)
-    env.export_temp_pairs(temp_json_path)
+    _export_temp_pairs(env, temp_json_path, sample_indices)
 
     if args.dry_run:
         payload = {
             "config": vars(args),
+            "selection": selection_metadata,
             "temp_json_path": temp_json_path,
             "summary": {
-                "total_samples": len(env.samples),
+                "total_samples": len(sample_indices),
+                "total_available_samples": len(env.samples),
             },
             "results": [],
         }
@@ -195,8 +489,9 @@ def main() -> None:
     )
     generate_kwargs: Dict[str, Any] = {
         "max_tokens": int(args.max_tokens),
-        "temperature": float(args.temperature),
     }
+    if args.temperature is not None:
+        generate_kwargs["temperature"] = float(args.temperature)
     model_name_lower = str(args.model).lower()
     provider_lower = str(args.provider).lower()
     if provider_lower == "anthropic" and (
@@ -232,7 +527,6 @@ def main() -> None:
         generate_kwargs["reasoning_effort"] = str(args.reasoning_effort)
 
     results: List[Dict[str, Any]] = []
-    sample_indices = list(range(len(env.samples)))
     progress_bar = tqdm(
         total=len(sample_indices),
         desc="Token Estimation Eval",
@@ -313,6 +607,7 @@ def main() -> None:
             **vars(args),
             "api_key_env": api_key_env,
         },
+        "selection": selection_metadata,
         "temp_json_path": temp_json_path,
         "summary": _build_summary(results),
         "results": results,

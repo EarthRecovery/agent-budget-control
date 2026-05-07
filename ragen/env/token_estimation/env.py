@@ -88,6 +88,70 @@ def _resolve_turn_output_tokens(turn: Dict[str, Any]) -> Optional[int]:
     return value
 
 
+def _rough_text_token_count(text: str) -> int:
+    if not text:
+        return 0
+    return len(re.findall(r"\w+|[^\w\s]", text, re.UNICODE))
+
+
+def _extract_reasoning_tokens_from_usage_raw(raw_usage: Dict[str, Any]) -> Optional[int]:
+    if not isinstance(raw_usage, dict):
+        return None
+    for parent_key in ("output_tokens_details", "completion_tokens_details"):
+        parent = raw_usage.get(parent_key)
+        if not isinstance(parent, dict):
+            continue
+        reasoning_tokens = _safe_int(parent.get("reasoning_tokens"))
+        if reasoning_tokens is not None:
+            return max(0, int(reasoning_tokens))
+    return None
+
+
+def _resolve_turn_reasoning_tokens(turn: Dict[str, Any]) -> Optional[int]:
+    interactions = turn.get("api_interactions")
+    if not isinstance(interactions, list):
+        return None
+    reasoning_total = 0
+    found_reasoning_tokens = False
+    for interaction in interactions:
+        if not isinstance(interaction, dict):
+            continue
+        usage = interaction.get("usage")
+        raw_usage = usage.get("raw") if isinstance(usage, dict) else None
+        reasoning_tokens = _extract_reasoning_tokens_from_usage_raw(raw_usage or {})
+        if reasoning_tokens is None:
+            continue
+        reasoning_total += int(reasoning_tokens)
+        found_reasoning_tokens = True
+    if not found_reasoning_tokens:
+        return None
+    return reasoning_total
+
+
+def _estimate_turn_visible_output_tokens(turn: Dict[str, Any]) -> Optional[int]:
+    output_tokens = _resolve_turn_output_tokens(turn)
+    if output_tokens is None:
+        return None
+
+    output_tokens_int = max(0, int(output_tokens))
+    reasoning_tokens = _resolve_turn_reasoning_tokens(turn)
+    if reasoning_tokens is not None:
+        return max(0, output_tokens_int - int(reasoning_tokens))
+
+    raw_response = str(turn.get("raw_response") or turn.get("raw_generation") or "").strip()
+    parsed_response = str(turn.get("parsed_response") or "").strip()
+    if not raw_response or not parsed_response or raw_response == parsed_response:
+        return output_tokens_int
+
+    raw_token_estimate = _rough_text_token_count(raw_response)
+    parsed_token_estimate = _rough_text_token_count(parsed_response)
+    if raw_token_estimate <= 0 or parsed_token_estimate <= 0:
+        return output_tokens_int
+
+    visible_ratio = min(1.0, float(parsed_token_estimate) / float(raw_token_estimate))
+    return max(0, int(round(float(output_tokens_int) * visible_ratio)))
+
+
 def _extract_last_user_message(messages: List[Dict[str, Any]]) -> Optional[str]:
     for message in reversed(messages):
         if str(message.get("role", "") or "").strip() == "user":
@@ -105,15 +169,15 @@ def _resolve_turn_user_content(turn: Dict[str, Any]) -> str:
 
 
 def _resolve_turn_assistant_content(turn: Dict[str, Any]) -> str:
+    parsed = str(turn.get("parsed_response") or "").strip()
+    if parsed:
+        return parsed
     raw_response = str(turn.get("raw_response") or "").strip()
     if raw_response:
         return raw_response
     raw_generation = str(turn.get("raw_generation") or "").strip()
     if raw_generation:
         return raw_generation
-    parsed = str(turn.get("parsed_response") or "").strip()
-    if parsed:
-        return parsed
     return ""
 
 
@@ -216,19 +280,29 @@ def _build_cumulative_totals_from_details(
 
 def _request_usage_input_includes_history(
     request_details: List[Dict[str, Optional[int]]],
+    visible_output_tokens: Optional[List[Optional[int]]] = None,
 ) -> bool:
     comparable = 0
     history_votes = 0
-    prev_request_total: Optional[int] = None
-    for detail in request_details:
+    prev_request_input: Optional[int] = None
+    normalized_visible_output_tokens = list(visible_output_tokens or [])
+    if len(normalized_visible_output_tokens) < len(request_details):
+        normalized_visible_output_tokens.extend(
+            [None] * (len(request_details) - len(normalized_visible_output_tokens))
+        )
+
+    for idx, detail in enumerate(request_details):
         current_input = detail.get("input_tokens")
-        if prev_request_total is not None and current_input is not None:
+        if prev_request_input is not None and current_input is not None:
             comparable += 1
-            if int(current_input) >= int(prev_request_total):
+            prev_visible_output_tokens = normalized_visible_output_tokens[idx - 1]
+            baseline = int(prev_request_input)
+            if prev_visible_output_tokens is not None:
+                baseline += int(prev_visible_output_tokens)
+            if int(current_input) >= baseline:
                 history_votes += 1
-        current_total = detail.get("total_tokens")
-        if current_total is not None:
-            prev_request_total = int(current_total)
+        if current_input is not None:
+            prev_request_input = int(current_input)
     if comparable == 0:
         return False
     return history_votes * 2 >= comparable
@@ -236,17 +310,25 @@ def _request_usage_input_includes_history(
 
 def _convert_request_usage_to_turn_usage(
     request_details: List[Dict[str, Optional[int]]],
+    *,
+    visible_output_tokens: Optional[List[Optional[int]]] = None,
 ) -> List[Dict[str, Optional[int]]]:
     normalized_request_details = [
         _normalize_usage_detail(detail) for detail in request_details
     ]
+    normalized_visible_output_tokens = list(visible_output_tokens or [])
+    if len(normalized_visible_output_tokens) < len(normalized_request_details):
+        normalized_visible_output_tokens.extend(
+            [None] * (len(normalized_request_details) - len(normalized_visible_output_tokens))
+        )
     input_includes_history = _request_usage_input_includes_history(
-        normalized_request_details
+        normalized_request_details,
+        visible_output_tokens=normalized_visible_output_tokens,
     )
 
     turn_usage_details: List[Dict[str, Optional[int]]] = []
-    prev_request_total: Optional[int] = None
-    for detail in normalized_request_details:
+    prev_request_input: Optional[int] = None
+    for idx, detail in enumerate(normalized_request_details):
         request_input_tokens = detail.get("input_tokens")
         output_tokens = detail.get("output_tokens")
         request_total_tokens = detail.get("total_tokens")
@@ -254,11 +336,15 @@ def _convert_request_usage_to_turn_usage(
         if (
             input_includes_history
             and request_input_tokens is not None
-            and prev_request_total is not None
+            and prev_request_input is not None
         ):
+            baseline = int(prev_request_input)
+            prev_visible_output_tokens = normalized_visible_output_tokens[idx - 1]
+            if prev_visible_output_tokens is not None:
+                baseline += int(prev_visible_output_tokens)
             input_tokens = max(
                 0,
-                int(request_input_tokens) - int(prev_request_total),
+                int(request_input_tokens) - baseline,
             )
         else:
             input_tokens = request_input_tokens
@@ -280,8 +366,8 @@ def _convert_request_usage_to_turn_usage(
             }
         )
 
-        if request_total_tokens is not None:
-            prev_request_total = int(request_total_tokens)
+        if request_input_tokens is not None:
+            prev_request_input = int(request_input_tokens)
 
     return turn_usage_details
 
@@ -512,7 +598,9 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
             if not turns:
                 continue
 
-            rollout_success = any(bool(turn.get("success")) for turn in turns)
+            rollout_success = bool(rollout.get("rollout_success"))
+            if not rollout_success:
+                rollout_success = any(bool(turn.get("success")) for turn in turns)
             raw_per_turn_token_usage_details = [
                 _resolve_turn_token_usage_detail(turn) for turn in turns
             ]
@@ -520,8 +608,12 @@ class TokenEstimationEnv(BaseLanguageBasedEnv):
                 _normalize_usage_detail(detail)
                 for detail in raw_per_turn_token_usage_details
             ]
+            visible_output_tokens = [
+                _estimate_turn_visible_output_tokens(turn) for turn in turns
+            ]
             local_turn_token_usage_details = _convert_request_usage_to_turn_usage(
-                request_token_usage_details
+                request_token_usage_details,
+                visible_output_tokens=visible_output_tokens,
             )
             per_turn_token_usage_details = (
                 local_turn_token_usage_details

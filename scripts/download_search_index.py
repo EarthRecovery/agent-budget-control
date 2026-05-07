@@ -23,10 +23,15 @@ DEFAULT_SEARCHR1_DATA_ROOT = os.environ.get(
     "/projects/bflz/searchr1_data",
 )
 DEFAULT_INDEX_ROOT = os.path.join(DEFAULT_SEARCHR1_DATA_ROOT, "search_data")
+DEFAULT_WIKI_CORPUS_REPO_ID = os.environ.get("WIKI_CORPUS_REPO_ID", "")
+DEFAULT_WIKI_E5_INDEX_REPO_ID = os.environ.get("WIKI_E5_INDEX_REPO_ID", "")
 
 
 def download_wikipedia_corpus(save_path: str):
-    print("Downloading Wikipedia corpus from PeterJinGo/wiki-18-corpus...")
+    if not DEFAULT_WIKI_CORPUS_REPO_ID:
+        raise ValueError("WIKI_CORPUS_REPO_ID must be set to a Hugging Face dataset repo id.")
+
+    print("Downloading Wikipedia corpus from configured Hugging Face repo...")
 
     wiki_dir = os.path.join(save_path, "wikipedia")
     os.makedirs(wiki_dir, exist_ok=True)
@@ -39,10 +44,10 @@ def download_wikipedia_corpus(save_path: str):
         return wiki_file
 
     try:
-        print("Downloading wiki-18.jsonl.gz from PeterJinGo/wiki-18-corpus...")
+        print("Downloading wiki-18.jsonl.gz from configured Hugging Face repo...")
 
         hf_hub_download(
-            repo_id="PeterJinGo/wiki-18-corpus",
+            repo_id=DEFAULT_WIKI_CORPUS_REPO_ID,
             filename="wiki-18.jsonl.gz",
             repo_type="dataset",
             local_dir=wiki_dir,
@@ -106,13 +111,16 @@ def download_wikipedia_corpus(save_path: str):
 
 
 def download_prebuilt_indices(save_path: str):
-    print("Downloading pre-built E5 indices from PeterJinGo/wiki-18-e5-index...")
+    if not DEFAULT_WIKI_E5_INDEX_REPO_ID:
+        raise ValueError("WIKI_E5_INDEX_REPO_ID must be set to a Hugging Face dataset repo id.")
+
+    print("Downloading pre-built E5 indices from configured Hugging Face repo...")
 
     indices_dir = os.path.join(save_path, "prebuilt_indices")
     os.makedirs(indices_dir, exist_ok=True)
 
     try:
-        repo_id = "PeterJinGo/wiki-18-e5-index"
+        repo_id = DEFAULT_WIKI_E5_INDEX_REPO_ID
         for file in ["part_aa", "part_ab"]:
             print(f"Downloading {file}...")
             hf_hub_download(

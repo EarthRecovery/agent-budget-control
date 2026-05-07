@@ -14,5 +14,5 @@
 - Rollout cached-input share: 0.465
 - Estimation cached-input share: 0.125
 
-- Rollout source: `/u/ylin30/database/origin/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json`
-- Estimation source: `/u/ylin30/database/estimation/sokoban-origin-gpt5.2-instant-128-main_gpt5.2-instant-128-token-estimation-main/sokoban-origin-gpt5.2-instant-128-main_gpt5.2-instant-128-token-estimation-main.json`
+- Rollout source: `${HOME}/database/origin/sokoban-origin-gpt5.2-instant-128-main/sokoban_api_eval_estimation_eval_estimation_dialogues.json`
+- Estimation source: `${HOME}/database/estimation/sokoban-origin-gpt5.2-instant-128-main_gpt5.2-instant-128-token-estimation-main/sokoban-origin-gpt5.2-instant-128-main_gpt5.2-instant-128-token-estimation-main.json`

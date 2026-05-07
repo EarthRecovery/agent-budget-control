@@ -4,7 +4,7 @@ The `CostEstimator` class offers a convenient way to estimate the cost of using 
 
 ## 🌟 Features:
 
-![Screenshot of an estimation](https://raw.githubusercontent.com/michaelachmann/gpt-cost-estimator/master/images/screenshot.png)
+![Screenshot of an estimation]()
 
 - **tqdm Integration**: Seamlessly integrates into `tqdm` powered loops and displays the cost of each API call and the accumulated total cost.
 - **Model Synonyms**: Easily switch between model versions or names. 🔄
@@ -13,7 +13,7 @@ The `CostEstimator` class offers a convenient way to estimate the cost of using 
 
 
 ## 🛠 Usage:
-The CostEstimator class was designed to be used in Jupyter Notebooks, see the [example notebook](https://github.com/michaelachmann/gpt-cost-estimator/blob/master/examples/example_notebook.ipynb) for a demonstration. 
+The CostEstimator class was designed to be used in Jupyter Notebooks; see the example notebook for a demonstration.
 
 1. **Decorate your API call function**:
    ```python

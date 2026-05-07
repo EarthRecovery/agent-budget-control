@@ -90,7 +90,6 @@ def compute_grpo_outcome_advantage(
 
     return scores, scores
 
-# supported by Kangrui Wang
 def compute_bi_level_gae_advantage_return(
         token_level_rewards: torch.Tensor,
         values: torch.Tensor, 

@@ -79,7 +79,7 @@ setup(
     version='0.1',
     package_dir={'': '.'},
     packages=find_packages(include=['ragen']),
-    author='RAGEN Team',
+    author='',
     author_email='',
     acknowledgements='',
     description='',

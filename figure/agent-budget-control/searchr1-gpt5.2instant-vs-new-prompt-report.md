@@ -7,12 +7,12 @@
 
 两组结果使用相同 rollout 源：
 
-- Rollout source: `/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json`
+- Rollout source: `${HOME}/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json`
 
 区别只在 estimation 输入：
 
-- Baseline estimation: `/u/ylin30/database/estimation/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main.json`
-- New prompt estimation: `/u/ylin30/database/estimation-test/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main2/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main2.json`
+- Baseline estimation: `${HOME}/database/estimation/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main.json`
+- New prompt estimation: `${HOME}/database/estimation-test/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main2/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main2.json`
 
 ## Headline
 

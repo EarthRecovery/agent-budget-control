@@ -264,6 +264,173 @@ def _write_api_usage_fixture(path):
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
+def _write_reasoning_tokens_fixture(path):
+    payload = [
+        {
+            "env_id": 0,
+            "absolute_env_id": 0,
+            "turns": [
+                {
+                    "turn_idx": 1,
+                    "messages": [
+                        {"role": "system", "content": "reasoning system"},
+                        {"role": "user", "content": "question turn 1"},
+                    ],
+                    "raw_response": "hidden alpha hidden beta final-answer-1",
+                    "parsed_response": "final-answer-1",
+                    "api_interactions": [
+                        {
+                            "input_tokens": 100,
+                            "output_tokens": 50,
+                            "total_tokens": 150,
+                            "usage": {
+                                "raw": {
+                                    "input_tokens": 100,
+                                    "output_tokens": 50,
+                                    "total_tokens": 150,
+                                    "output_tokens_details": {
+                                        "reasoning_tokens": 40,
+                                    },
+                                }
+                            },
+                        }
+                    ],
+                    "api_input_tokens": 100,
+                    "api_output_tokens": 50,
+                    "api_total_tokens": 150,
+                    "success": False,
+                },
+                {
+                    "turn_idx": 2,
+                    "messages": [
+                        {"role": "system", "content": "reasoning system"},
+                        {"role": "user", "content": "question turn 1"},
+                        {"role": "assistant", "content": "final-answer-1"},
+                        {"role": "user", "content": "question turn 2"},
+                    ],
+                    "raw_response": "hidden gamma hidden delta final-answer-2",
+                    "parsed_response": "final-answer-2",
+                    "api_interactions": [
+                        {
+                            "input_tokens": 130,
+                            "output_tokens": 40,
+                            "total_tokens": 170,
+                            "usage": {
+                                "raw": {
+                                    "input_tokens": 130,
+                                    "output_tokens": 40,
+                                    "total_tokens": 170,
+                                    "output_tokens_details": {
+                                        "reasoning_tokens": 30,
+                                    },
+                                }
+                            },
+                        }
+                    ],
+                    "api_input_tokens": 130,
+                    "api_output_tokens": 40,
+                    "api_total_tokens": 170,
+                    "success": False,
+                },
+                {
+                    "turn_idx": 3,
+                    "messages": [
+                        {"role": "system", "content": "reasoning system"},
+                        {"role": "user", "content": "question turn 1"},
+                        {"role": "assistant", "content": "final-answer-1"},
+                        {"role": "user", "content": "question turn 2"},
+                        {"role": "assistant", "content": "final-answer-2"},
+                        {"role": "user", "content": "question turn 3"},
+                    ],
+                    "raw_response": "hidden epsilon final-answer-3",
+                    "parsed_response": "final-answer-3",
+                    "api_interactions": [
+                        {
+                            "input_tokens": 165,
+                            "output_tokens": 30,
+                            "total_tokens": 195,
+                            "usage": {
+                                "raw": {
+                                    "input_tokens": 165,
+                                    "output_tokens": 30,
+                                    "total_tokens": 195,
+                                    "output_tokens_details": {
+                                        "reasoning_tokens": 20,
+                                    },
+                                }
+                            },
+                        }
+                    ],
+                    "api_input_tokens": 165,
+                    "api_output_tokens": 30,
+                    "api_total_tokens": 195,
+                    "success": True,
+                },
+            ],
+        }
+    ]
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
+def _write_hidden_output_without_breakdown_fixture(path):
+    payload = [
+        {
+            "env_id": 0,
+            "absolute_env_id": 0,
+            "turns": [
+                {
+                    "turn_idx": 1,
+                    "messages": [
+                        {"role": "system", "content": "fallback system"},
+                        {"role": "user", "content": "question turn 1"},
+                    ],
+                    "raw_response": "hidden_one hidden_two answer_one",
+                    "parsed_response": "answer_one",
+                    "api_input_tokens": 90,
+                    "api_output_tokens": 60,
+                    "api_total_tokens": 150,
+                    "success": False,
+                },
+                {
+                    "turn_idx": 2,
+                    "messages": [
+                        {"role": "system", "content": "fallback system"},
+                        {"role": "user", "content": "question turn 1"},
+                        {"role": "assistant", "content": "answer_one"},
+                        {"role": "user", "content": "question turn 2"},
+                    ],
+                    "raw_response": "hidden_three hidden_four answer_two",
+                    "parsed_response": "answer_two",
+                    "api_input_tokens": 140,
+                    "api_output_tokens": 30,
+                    "api_total_tokens": 170,
+                    "success": False,
+                },
+                {
+                    "turn_idx": 3,
+                    "messages": [
+                        {"role": "system", "content": "fallback system"},
+                        {"role": "user", "content": "question turn 1"},
+                        {"role": "assistant", "content": "answer_one"},
+                        {"role": "user", "content": "question turn 2"},
+                        {"role": "assistant", "content": "answer_two"},
+                        {"role": "user", "content": "question turn 3"},
+                    ],
+                    "raw_response": "hidden_five hidden_six answer_three",
+                    "parsed_response": "answer_three",
+                    "api_input_tokens": 190,
+                    "api_output_tokens": 30,
+                    "api_total_tokens": 220,
+                    "success": True,
+                },
+            ],
+        }
+    ]
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
 def _write_truncated_turn_fixture(path):
     payload = [
         {
@@ -498,7 +665,7 @@ def test_token_estimation_env_flattens_and_scores(tmp_path):
     assert "Based on the provided rollout context" in exported_prompt["content"]
     assert "You have completed 1 turns." in exported_prompt["content"]
     assert (
-        "Each turn, your token consumption is "
+        "Per-turn token usage so far, excluding reused history from earlier turns, is: "
         "Turn 1: input 30 tokens, output 50 tokens, total 80 tokens."
     ) in exported_prompt["content"]
     assert "You need to finish the task within 120 tokens." in exported_prompt["content"]
@@ -513,7 +680,7 @@ def test_token_estimation_env_flattens_and_scores(tmp_path):
     assert "search[q]" in prompt
     assert "You have completed 1 turns." in prompt
     assert (
-        "Each turn, your token consumption is "
+        "Per-turn token usage so far, excluding reused history from earlier turns, is: "
         "Turn 1: input 30 tokens, output 50 tokens, total 80 tokens"
     ) in prompt
     system_message, first_user_message, first_assistant_message, user_message = env.build_api_messages()
@@ -611,7 +778,7 @@ def test_token_estimation_env_uses_cumulative_total_deltas_for_real_rollouts(tmp
     assert "Turn 2: input 158 tokens, output 46 tokens, total 204 tokens" in prompt
 
 
-def test_token_estimation_env_uses_direct_api_usage_when_available(tmp_path):
+def test_token_estimation_env_can_preserve_request_usage_when_requested(tmp_path):
     input_path = tmp_path / "dialogues_api_usage.json"
     _write_api_usage_fixture(input_path)
 
@@ -619,6 +786,7 @@ def test_token_estimation_env_uses_direct_api_usage_when_available(tmp_path):
         TokenEstimationEnvConfig(
             input_path=str(input_path),
             max_context_window_tokens=4000,
+            turn_usage_mode="request",
         )
     )
 
@@ -644,7 +812,7 @@ def test_token_estimation_env_uses_direct_api_usage_when_available(tmp_path):
     assert "Turn 3: input 529 tokens, output 45 tokens, total 574 tokens" in prompt
 
 
-def test_token_estimation_env_can_expose_turn_usage_excluding_history(tmp_path):
+def test_token_estimation_env_defaults_to_turn_usage_excluding_history(tmp_path):
     input_path = tmp_path / "dialogues_api_usage_excluding_history.json"
     _write_api_usage_fixture(input_path)
 
@@ -652,7 +820,6 @@ def test_token_estimation_env_can_expose_turn_usage_excluding_history(tmp_path):
         TokenEstimationEnvConfig(
             input_path=str(input_path),
             max_context_window_tokens=4000,
-            turn_usage_mode="turn_excluding_history",
         )
     )
 
@@ -674,11 +841,84 @@ def test_token_estimation_env_can_expose_turn_usage_excluding_history(tmp_path):
 
     prompt = env.reset(index=2)
     assert (
-        "Each turn, your token consumption is "
+        "Per-turn token usage so far, excluding reused history from earlier turns, is: "
         "Turn 1: input 195 tokens, output 56 tokens, total 251 tokens; "
         "Turn 2: input 121 tokens, output 42 tokens, total 163 tokens; "
         "Turn 3: input 115 tokens, output 45 tokens, total 160 tokens"
     ) in prompt
+
+
+def test_token_estimation_env_excludes_hidden_reasoning_tokens_from_history(tmp_path):
+    input_path = tmp_path / "dialogues_reasoning_tokens.json"
+    _write_reasoning_tokens_fixture(input_path)
+
+    env = TokenEstimationEnv(
+        TokenEstimationEnvConfig(
+            input_path=str(input_path),
+            max_context_window_tokens=1000,
+        )
+    )
+
+    assert len(env.samples) == 2
+
+    second_sample = env.samples[1]
+    assert second_sample.completed_turn_token_usage == [150, 60]
+    assert second_sample.completed_turn_token_usage_details == [
+        {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+        {"input_tokens": 20, "output_tokens": 40, "total_tokens": 60},
+    ]
+    assert second_sample.completed_turn_request_token_usage == [150, 170]
+    assert second_sample.completed_turn_request_token_usage_details == [
+        {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+        {"input_tokens": 130, "output_tokens": 40, "total_tokens": 170},
+    ]
+    assert second_sample.actual_tokens_used_so_far == 210
+    assert second_sample.actual_remaining_total_tokens == 55
+    assert second_sample.input_messages == [
+        {"role": "user", "content": "question turn 1"},
+        {"role": "assistant", "content": "final-answer-1"},
+        {"role": "user", "content": "question turn 2"},
+        {"role": "assistant", "content": "final-answer-2"},
+    ]
+
+    prompt = env.reset(index=1)
+    assert "Turn 2: input 20 tokens, output 40 tokens, total 60 tokens" in prompt
+    assert "hidden alpha" not in prompt
+    assert "hidden gamma" not in prompt
+
+
+def test_token_estimation_env_estimates_visible_history_without_reasoning_breakdown(tmp_path):
+    input_path = tmp_path / "dialogues_hidden_output_no_breakdown.json"
+    _write_hidden_output_without_breakdown_fixture(input_path)
+
+    env = TokenEstimationEnv(
+        TokenEstimationEnvConfig(
+            input_path=str(input_path),
+            max_context_window_tokens=1000,
+        )
+    )
+
+    assert len(env.samples) == 2
+
+    second_sample = env.samples[1]
+    assert second_sample.completed_turn_token_usage == [150, 60]
+    assert second_sample.completed_turn_token_usage_details == [
+        {"input_tokens": 90, "output_tokens": 60, "total_tokens": 150},
+        {"input_tokens": 30, "output_tokens": 30, "total_tokens": 60},
+    ]
+    assert second_sample.actual_tokens_used_so_far == 210
+    assert second_sample.actual_remaining_total_tokens == 70
+    assert second_sample.input_messages == [
+        {"role": "user", "content": "question turn 1"},
+        {"role": "assistant", "content": "answer_one"},
+        {"role": "user", "content": "question turn 2"},
+        {"role": "assistant", "content": "answer_two"},
+    ]
+
+    prompt = env.reset(index=1)
+    assert "Turn 2: input 30 tokens, output 30 tokens, total 60 tokens" in prompt
+    assert "hidden_one" not in prompt
+    assert "hidden_three" not in prompt
 
 
 def test_token_estimation_env_discards_context_token_truncated_turns(tmp_path):
@@ -713,6 +953,7 @@ def test_token_estimation_env_discards_implicit_over_limit_terminal_turns(tmp_pa
         TokenEstimationEnvConfig(
             input_path=str(input_path),
             max_context_window_tokens=3500,
+            turn_usage_mode="request",
         )
     )
 
@@ -723,8 +964,8 @@ def test_token_estimation_env_discards_implicit_over_limit_terminal_turns(tmp_pa
     assert first_sample.total_turns == 3
     assert last_sample.total_turns == 3
     assert first_sample.actual_tokens_used_so_far == 251
-    assert first_sample.actual_remaining_total_tokens == 988
-    assert last_sample.actual_tokens_used_so_far == 665
-    assert last_sample.actual_remaining_total_tokens == 574
+    assert first_sample.actual_remaining_total_tokens == 323
+    assert last_sample.actual_tokens_used_so_far == 414
+    assert last_sample.actual_remaining_total_tokens == 160
     assert last_sample.target_output == "<think>third</think><answer>search[q3]</answer>"
     assert last_sample.actual_can_finish is False

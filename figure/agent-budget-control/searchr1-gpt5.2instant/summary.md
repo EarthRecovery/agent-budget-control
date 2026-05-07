@@ -13,5 +13,5 @@
 - Rollout cached-input share: 0.220
 - Estimation cached-input share: 0.020
 
-- Rollout source: `/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json`
-- Estimation source: `/u/ylin30/database/estimation/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main.json`
+- Rollout source: `${HOME}/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json`
+- Estimation source: `${HOME}/database/estimation/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main/searchr1-origin-gpt5.2-instant-128-main_gpt5.2-instant-token-estimation-main.json`

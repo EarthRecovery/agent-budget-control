@@ -10,7 +10,7 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PWD:$PWD/verl"
 
 PROVIDER=${PROVIDER:-anthropic}
-MODEL_NAME=${MODEL_NAME:-Claude-Opus-4.7-low-thinking}
+MODEL_NAME=${MODEL_NAME:-qwen/qwen3-235b-a22b-2507}
 REASONING_EFFORT=${REASONING_EFFORT:-}
 OPENROUTER_REASONING_ENABLED=${OPENROUTER_REASONING_ENABLED:-}
 OPENROUTER_CACHE_ENABLED=${OPENROUTER_CACHE_ENABLED:-}
@@ -20,6 +20,11 @@ case "$MODEL_NAME" in
     PROVIDER=openai
     MODEL_NAME=gpt-5.2
     REASONING_EFFORT=${REASONING_EFFORT:-none}
+    ;;
+  OpenAI-5.2-Codex-low-thinking)
+    PROVIDER=openai
+    MODEL_NAME=gpt-5.2
+    REASONING_EFFORT=${REASONING_EFFORT:-low}
     ;;
   OpenAI-5.2-Thinking)
     PROVIDER=openai
@@ -37,6 +42,11 @@ case "$MODEL_NAME" in
   Claude-Opus-4.7-low-thinking)
     PROVIDER=anthropic
     MODEL_NAME=claude-opus-4-7
+    ANTHROPIC_OUTPUT_EFFORT=${ANTHROPIC_OUTPUT_EFFORT:-low}
+    ;;
+  Claude-Opus-4.6-low-thinking)
+    PROVIDER=anthropic
+    MODEL_NAME=claude-opus-4-6
     ANTHROPIC_OUTPUT_EFFORT=${ANTHROPIC_OUTPUT_EFFORT:-low}
     ;;
   Claude-Sonnet-4.6-low-thinking)
@@ -103,7 +113,7 @@ case "$PROVIDER" in
     ;;
 esac
 
-RUN_NAME=${RUN_NAME:-searchr1-origin-Claude-Opus-4.7-low-thinking-128-main_Claude-Opus-4.7-low-thinking-128-token-estimation-main}
+RUN_NAME=${RUN_NAME:-searchr1-origin-qwen-qwen3-235b-a22b-2507-128-main_qwen-qwen3-235b-a22b-2507-main}
 RESULT_ROOT=${RESULT_ROOT:-"$PROJECT_ROOT/results/evaluation-scripts/eval"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$RESULT_ROOT/${RUN_NAME}"}
 OUTPUT_JSON=${OUTPUT_JSON:-"$OUTPUT_DIR/${RUN_NAME}.json"}
@@ -125,10 +135,10 @@ ANTHROPIC_THINKING_DISPLAY=${ANTHROPIC_THINKING_DISPLAY:-}
 ANTHROPIC_OUTPUT_EFFORT=${ANTHROPIC_OUTPUT_EFFORT:-}
 DRY_RUN=${DRY_RUN:-0}
 
-DEFAULT_RESULT_INPUT_JSON="/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
+DEFAULT_RESULT_INPUT_JSON="${HOME}/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
 DEFAULT_TEST_INPUT_JSON="$PROJECT_ROOT/results/estimation/searchr1-origin-gpt5.2-instant-15-test/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
-DEFAULT_DATABASE_INPUT_JSON="/u/ylin30/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
-INPUT_JSON=${INPUT_JSON:-"/u/ylin30/database/origin/searchr1-origin-Claude-Opus-4.7-low-thinking-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"}
+DEFAULT_DATABASE_INPUT_JSON="${HOME}/database/origin/searchr1-origin-gpt5.2-instant-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"
+INPUT_JSON=${INPUT_JSON:-"${HOME}/database/origin/searchr1-origin-qwen-qwen3-235b-a22b-2507-128-main/search_r1_api_eval_estimation_eval_estimation_dialogues.json"}
 if [[ -z "$INPUT_JSON" ]]; then
   if [[ -f "$DEFAULT_RESULT_INPUT_JSON" ]]; then
     INPUT_JSON="$DEFAULT_RESULT_INPUT_JSON"
@@ -166,12 +176,24 @@ CMD=(
   --max-concurrency "$MAX_CONCURRENCY"
   --request-batch-size "$REQUEST_BATCH_SIZE"
   --max-tokens "$MAX_TOKENS"
-  --temperature "$TEMPERATURE"
   --max-turn "$MAX_TURN"
   --max-context-window-tokens "$MAX_CONTEXT_WINDOW_TOKENS"
   --system-prompt-file "$SYSTEM_PROMPT_FILE"
   --user-prompt-file "$USER_PROMPT_FILE"
 )
+
+SHOULD_PASS_TEMPERATURE=1
+if [[ "$PROVIDER" == "openai" ]]; then
+  case "$MODEL_NAME" in
+    gpt-5*|o*)
+      SHOULD_PASS_TEMPERATURE=0
+      ;;
+  esac
+fi
+
+if [[ "$SHOULD_PASS_TEMPERATURE" == "1" && -n "${TEMPERATURE:-}" ]]; then
+  CMD+=(--temperature "$TEMPERATURE")
+fi
 
 if [[ -n "$REASONING_EFFORT" ]]; then
   CMD+=(--reasoning-effort "$REASONING_EFFORT")
