@@ -136,7 +136,7 @@ case "$TASK" in
       "custom_envs.${ENV_TAG}.env_config.dim_x=${SOKOBAN_DIM_X}"
       "custom_envs.${ENV_TAG}.env_config.dim_y=${SOKOBAN_DIM_Y}"
       "custom_envs.${ENV_TAG}.env_config.num_boxes=${SOKOBAN_NUM_BOXES}"
-      "custom_envs.${ENV_TAG}.env_config.search_depth=${SOKOBAN_SEARCH_DEPTH}"
+      "++custom_envs.${ENV_TAG}.env_config.search_depth=${SOKOBAN_SEARCH_DEPTH}"
       "custom_envs.${ENV_TAG}.env_config.observation_format=${SOKOBAN_OBSERVATION_FORMAT}"
     )
     ;;

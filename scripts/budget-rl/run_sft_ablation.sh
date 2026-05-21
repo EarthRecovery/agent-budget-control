@@ -59,6 +59,7 @@ fi
 
 # H200 is SM 9.0
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 NGPUS=${NGPUS:-8}
 MODEL=${MODEL:-"Qwen/Qwen2.5-7B-Instruct"}
@@ -66,6 +67,9 @@ LR=${LR:-5e-6}
 TOTAL_EPOCHS=${TOTAL_EPOCHS:-5}
 MICRO_BS=${MICRO_BS:-2}
 TRAIN_BS=${TRAIN_BS:-16}
+SFT_MAX_LENGTH=${SFT_MAX_LENGTH:-9216}
+SFT_MAX_TOKEN_LEN_PER_GPU=${SFT_MAX_TOKEN_LEN_PER_GPU:-$SFT_MAX_LENGTH}
+SFT_MODEL_DTYPE=${SFT_MODEL_DTYPE:-bfloat16}
 TRAINER_LOGGER=${TRAINER_LOGGER:-'["console","wandb"]'}
 PROJECT_NAME=${PROJECT_NAME:-budget_probe_sft_ablation}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-${ABLATION}}
@@ -97,10 +101,12 @@ torchrun --standalone --nnodes=1 --nproc_per_node=${NGPUS} \
     data.messages_key=messages \
     data.train_batch_size=${TRAIN_BS} \
     data.micro_batch_size_per_gpu=${MICRO_BS} \
-    data.max_length=9216 \
+    data.max_length=${SFT_MAX_LENGTH} \
+    data.max_token_len_per_gpu=${SFT_MAX_TOKEN_LEN_PER_GPU} \
     +data.ignore_input_ids_mismatch=True \
     optim.lr=${LR} \
     engine=fsdp \
+    engine.model_dtype=${SFT_MODEL_DTYPE} \
     model.path=${MODEL} \
     model.use_remove_padding=True \
     trainer.default_local_dir="${SAVE_DIR}" \

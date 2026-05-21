@@ -45,6 +45,9 @@ export PYTHONPATH="${PROJECT_ROOT}:${PROJECT_ROOT}/verl${PYTHONPATH:+:${PYTHONPA
 
 # H200 is SM 9.0 (Hopper). Required for megatron-core JIT compilation at import time.
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0}"
+# vLLM's CuMemAllocator memory pool is incompatible with PyTorch expandable
+# segments, so keep this unset for RL rollout/training.
+unset PYTORCH_CUDA_ALLOC_CONF
 
 # Configurable parameters
 NGPUS=${NGPUS:-8}
@@ -56,6 +59,10 @@ TOTAL_EPOCHS=${TOTAL_EPOCHS:-15}
 ROLLOUT_N=${ROLLOUT_N:-5}
 TP_SIZE=${TP_SIZE:-2}
 TRAINER_LOGGER=${TRAINER_LOGGER:-'["console","wandb"]'}
+RL_MODEL_DTYPE=${RL_MODEL_DTYPE:-bfloat16}
+RL_ACTOR_PARAM_OFFLOAD=${RL_ACTOR_PARAM_OFFLOAD:-False}
+RL_ACTOR_OPTIMIZER_OFFLOAD=${RL_ACTOR_OPTIMIZER_OFFLOAD:-True}
+RL_REF_PARAM_OFFLOAD=${RL_REF_PARAM_OFFLOAD:-True}
 PROJECT_NAME=${PROJECT_NAME:-budget_probe_grpo}
 TRAIN_FILES="${DATA_DIR}/rl/train.parquet"
 VAL_FILES="${DATA_DIR}/rl/test.parquet"
@@ -83,15 +90,17 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    actor_rollout_ref.actor.fsdp_config.param_offload=False \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.actor.fsdp_config.model_dtype=${RL_MODEL_DTYPE} \
+    actor_rollout_ref.actor.fsdp_config.param_offload=${RL_ACTOR_PARAM_OFFLOAD} \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=${RL_ACTOR_OPTIMIZER_OFFLOAD} \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${TP_SIZE} \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.rollout.n=${ROLLOUT_N} \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
-    actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    actor_rollout_ref.ref.fsdp_config.model_dtype=${RL_MODEL_DTYPE} \
+    actor_rollout_ref.ref.fsdp_config.param_offload=${RL_REF_PARAM_OFFLOAD} \
     algorithm.use_kl_in_reward=False \
     custom_reward_function.path="${REWARD_FN}" \
     custom_reward_function.name=compute_score \

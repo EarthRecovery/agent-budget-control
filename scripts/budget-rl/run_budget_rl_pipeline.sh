@@ -44,6 +44,8 @@ This runs a local-model budget RL loop inside agent-budget-control:
 Common overrides:
   TASK=sokoban
   TASK=searchr1
+  TASK=warehouse          # requires ROLLOUT_SOURCE_JSON or ROLLOUT_SOURCE_DIR
+  TASK=swebench           # requires SWE_INPUT_DIR, ROLLOUT_SOURCE_JSON, or ROLLOUT_SOURCE_DIR
   ROLLOUT_MODEL=Qwen/Qwen3-8B
   LEARNER_MODEL=Qwen/Qwen2.5-7B-Instruct
   NUM_TRAJECTORIES=128
@@ -55,6 +57,8 @@ Common overrides:
   DRY_RUN=1
 
 For SearchR1, start a retrieval server first or set SEARCH_MOCK_MODE=true.
+For Warehouse/SWE, the rollout stage converts pre-existing rollout logs into
+the JSONL format used by the shared SFT/RL data preparation.
 EOF
 }
 
@@ -68,8 +72,142 @@ task_name_for_prepare() {
   case "$TASK" in
     sokoban|coord_sokoban) printf 'sokoban' ;;
     searchr1|search|searchqa) printf 'searchr1' ;;
+    swe|swebench|swebanch|miniswebench) printf 'swebench' ;;
+    warehouse|money|money_estimation) printf 'warehouse' ;;
     *) printf '%s' "$TASK" ;;
   esac
+}
+
+normalize_path() {
+  local path="$1"
+  if [[ "$path" == "~/"* ]]; then
+    path="$HOME/${path#~/}"
+  elif [[ "$path" == "~" ]]; then
+    path="$HOME"
+  fi
+  if [[ "$path" != /* ]]; then
+    path="$PROJECT_ROOT/$path"
+  fi
+  printf '%s\n' "$path"
+}
+
+is_source_rollout_task() {
+  case "$TASK" in
+    warehouse|money|money_estimation|swe|swebench|swebanch|miniswebench)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+combine_rollout_json_dir() {
+  local source_dir="$1"
+  local output_json="$2"
+  python3 - "$source_dir" "$output_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+source_dir = Path(sys.argv[1]).expanduser().resolve()
+output_json = Path(sys.argv[2]).expanduser().resolve()
+rollouts = []
+
+def maybe_add(record):
+    if isinstance(record, dict) and "turns" in record:
+        rollouts.append(record)
+
+for path in sorted(source_dir.rglob("*.json")):
+    if path.resolve() == output_json:
+        continue
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if isinstance(payload, list):
+        for item in payload:
+            maybe_add(item)
+    elif isinstance(payload, dict):
+        if isinstance(payload.get("rollouts"), list):
+            for item in payload["rollouts"]:
+                maybe_add(item)
+        elif isinstance(payload.get("results"), list):
+            for item in payload["results"]:
+                maybe_add(item)
+        else:
+            maybe_add(payload)
+
+output_json.parent.mkdir(parents=True, exist_ok=True)
+with output_json.open("w", encoding="utf-8") as handle:
+    json.dump(rollouts, handle, ensure_ascii=False, indent=2)
+print(f"Combined {len(rollouts)} rollout(s) from {source_dir} -> {output_json}")
+if not rollouts:
+    raise SystemExit("No rollout records with a 'turns' field were found.")
+PY
+}
+
+prepare_source_rollouts() {
+  local source_json=""
+  local source_dir=""
+  local convert_json="$EXP_BASE/source_rollouts.json"
+  local -a convert_cmd
+
+  if [[ -n "${SWE_INPUT_DIR:-}" ]]; then
+    source_dir="$(normalize_path "$SWE_INPUT_DIR")"
+    source_json="$EXP_BASE/swebench_dialogues.json"
+    local -a prepare_cmd=(
+      python3 "$PROJECT_ROOT/scripts/budget-estimation-benchmark/prepare_swebench_dialogues.py"
+      --input-dir "$source_dir"
+      --output-json "$source_json"
+    )
+    if [[ -n "${MAX_ROLLOUTS:-}" ]]; then
+      prepare_cmd+=(--max-rollouts "$MAX_ROLLOUTS")
+    fi
+    if [[ "${DRY_RUN:-0}" = "1" ]]; then
+      printf '%q ' "${prepare_cmd[@]}"
+      printf '\n'
+    else
+      "${prepare_cmd[@]}"
+    fi
+  elif [[ -n "${ROLLOUT_SOURCE_JSON:-}" ]]; then
+    source_json="$(normalize_path "$ROLLOUT_SOURCE_JSON")"
+  elif [[ -n "${ROLLOUT_SOURCE_DIR:-}" ]]; then
+    source_dir="$(normalize_path "$ROLLOUT_SOURCE_DIR")"
+    source_json="$convert_json"
+    if [[ "${DRY_RUN:-0}" = "1" ]]; then
+      echo "DRY_RUN: would combine rollout JSON files from $source_dir -> $source_json"
+    else
+      combine_rollout_json_dir "$source_dir" "$source_json"
+    fi
+  else
+    if [[ "${DRY_RUN:-0}" = "1" ]]; then
+      echo "DRY_RUN: source task $TASK requires ROLLOUT_SOURCE_JSON, ROLLOUT_SOURCE_DIR, or SWE_INPUT_DIR"
+      return 0
+    fi
+    echo "TASK=$TASK uses pre-existing rollout data. Set ROLLOUT_SOURCE_JSON, ROLLOUT_SOURCE_DIR, or SWE_INPUT_DIR." >&2
+    exit 2
+  fi
+
+  if [[ "${DRY_RUN:-0}" != "1" && ! -f "$source_json" ]]; then
+    echo "Rollout source JSON not found: $source_json" >&2
+    exit 2
+  fi
+
+  convert_cmd=(
+    python3 "$SCRIPT_DIR/convert_estimation_dialogues.py"
+    --input "$source_json"
+    --output "$ROLLOUT_JSONL"
+  )
+  if [[ -n "${ROLLOUT_SOURCE_MAX_TURNS:-}" ]]; then
+    convert_cmd+=(--max-turns "$ROLLOUT_SOURCE_MAX_TURNS")
+  fi
+
+  if [[ "${DRY_RUN:-0}" = "1" ]]; then
+    printf '%q ' "${convert_cmd[@]}"
+    printf '\n'
+    return 0
+  fi
+
+  "${convert_cmd[@]}"
 }
 
 activate_runtime() {
@@ -99,6 +237,11 @@ activate_runtime() {
 }
 
 run_rollout() {
+  if is_source_rollout_task; then
+    prepare_source_rollouts
+    return 0
+  fi
+
   ROLLOUT_MODEL="$ROLLOUT_MODEL" \
   TASK="$TASK" \
   DATA_ROOT="$DATA_ROOT" \

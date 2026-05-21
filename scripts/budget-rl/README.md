@@ -34,6 +34,25 @@ TP_SIZE=4 \
 bash scripts/budget-rl/run_budget_rl_pipeline.sh all
 ```
 
+Run the five experiments from `/workspace/requirements.md`:
+
+```bash
+export VENV_PATH=/workspace/.venv
+export WANDB_API_KEY=...  # or WANDB_MODE=offline for a local smoke test
+
+# Optional for non-live rollout sources:
+export WAREHOUSE_ROLLOUT_SOURCE=/path/to/warehouse_rollouts.json
+export SWE_INPUT_DIR=/path/to/swebench_origin_dir
+
+bash scripts/budget-rl/run_required_experiments.sh all
+```
+
+For a command-only check that does not download models or train:
+
+```bash
+DRY_RUN=1 bash scripts/budget-rl/run_required_experiments.sh all
+```
+
 Run individual stages:
 
 ```bash
@@ -58,6 +77,8 @@ TASK=searchr1 SEARCH_MOCK_MODE=true bash scripts/budget-rl/run_budget_rl_pipelin
 - `EXP_BASE`: output directory for `rollouts.jsonl`, parquet data, and checkpoints.
 - `SFT_ABLATION`: SFT target variant, default `sft_interval_pct30`.
 - `DRY_RUN=1`: print commands without running heavy stages.
+- `ROLLOUT_SOURCE_JSON` / `ROLLOUT_SOURCE_DIR`: use existing Warehouse/SWE-style rollout JSON instead of live RAGEN rollout.
+- `SWE_INPUT_DIR`: convert a SWE-bench origin directory containing `*.traj.json` before data prep.
 
 The rollout stage writes OpenAI-style `rollouts.jsonl`; the prepare stage writes:
 
