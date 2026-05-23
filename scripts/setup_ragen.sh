@@ -177,8 +177,9 @@ main() {
         faiss-cpu==1.11.0 \
         numpy==1.26.4
 
-    # Reinstall setuptools<70 (vllm may upgrade it, breaking pkg_resources for gym_sokoban)
-    python -m pip install "setuptools<70.0.0"
+    # vLLM 0.11 requires modern setuptools, while setuptools<80 still provides
+    # pkg_resources for gym_sokoban.
+    python -m pip install "setuptools>=77.0.3,<80.0.0"
 
     print_step "Downloading project data"
     python scripts/download_data.py

@@ -23,8 +23,8 @@ DEFAULT_SEARCHR1_DATA_ROOT = os.environ.get(
     "/projects/bflz/searchr1_data",
 )
 DEFAULT_INDEX_ROOT = os.path.join(DEFAULT_SEARCHR1_DATA_ROOT, "search_data")
-DEFAULT_WIKI_CORPUS_REPO_ID = os.environ.get("WIKI_CORPUS_REPO_ID", "")
-DEFAULT_WIKI_E5_INDEX_REPO_ID = os.environ.get("WIKI_E5_INDEX_REPO_ID", "")
+DEFAULT_WIKI_CORPUS_REPO_ID = os.environ.get("WIKI_CORPUS_REPO_ID", "PeterJinGo/wiki-18-corpus")
+DEFAULT_WIKI_E5_INDEX_REPO_ID = os.environ.get("WIKI_E5_INDEX_REPO_ID", "PeterJinGo/wiki-18-e5-index")
 
 
 def download_wikipedia_corpus(save_path: str):

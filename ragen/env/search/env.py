@@ -72,6 +72,24 @@ class SearchEnv(BaseLanguageBasedEnv, gym.Env):
         self.step_count = 0
         self.render_cache = None
 
+    def _extract_ground_truth(self, item: Dict[str, Any]):
+        """Support both RAGEN HotpotQA parquet and Search-R1/NQ parquet schemas."""
+        if "ground_truth" in item and item["ground_truth"] is not None:
+            return item["ground_truth"]
+        if "golden_answers" in item and item["golden_answers"] is not None:
+            answers = item["golden_answers"]
+            if hasattr(answers, "tolist"):
+                answers = answers.tolist()
+            return list(answers) if isinstance(answers, (list, tuple)) else [answers]
+        reward_model = item.get("reward_model")
+        if isinstance(reward_model, dict):
+            target = reward_model.get("ground_truth", {}).get("target")
+            if target is not None:
+                if hasattr(target, "tolist"):
+                    target = target.tolist()
+                return list(target) if isinstance(target, (list, tuple)) else [target]
+        raise KeyError("Search item must contain ground_truth, golden_answers, or reward_model.ground_truth.target")
+
     def _resolve_data_path(self) -> str:
         """Resolve env vars, user home, and relative paths for the dataset file."""
         return os.path.abspath(os.path.expanduser(os.path.expandvars(self.config.train_path)))
@@ -116,7 +134,7 @@ class SearchEnv(BaseLanguageBasedEnv, gym.Env):
         item = self.data[self.index]
 
         self.question = item["question"]
-        self.ground_truth = item["ground_truth"]
+        self.ground_truth = self._extract_ground_truth(item)
         self.step_count = 0
 
         # Build initial observation (question only, no ground_truth exposed)

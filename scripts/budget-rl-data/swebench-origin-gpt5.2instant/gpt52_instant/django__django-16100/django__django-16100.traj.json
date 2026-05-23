@@ -1,0 +1,1495 @@
+{
+  "info": {
+    "model_stats": {
+      "instance_cost": 0.059403050000000006,
+      "api_calls": 16
+    },
+    "config": {
+      "agent": {
+        "system_template": "You are a helpful assistant that can interact with a computer shell to solve programming tasks.\n",
+        "instance_template": "<pr_description>\nConsider the following PR description:\n{{task}}\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\n\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n<IMPORTANT>This is an interactive process where you will think and issue AT LEAST ONE command, see the result, then think and issue your next command(s).</important>\n\nFor each response:\n\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide one or more bash tool calls to execute\n\n## Important Boundaries\n\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call. You can make MULTIPLE tool calls in a single response when the commands are independent (e.g., searching multiple files, reading different parts of the codebase).\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the Builder-related code. Let me find relevant files and check the project structure.\n\n[Makes multiple bash tool calls: {\"command\": \"ls -la\"}, {\"command\": \"find src -name '*.java' | grep -i builder\"}, {\"command\": \"cat README.md | head -50\"}]\n</example_response>\n\n## Environment Details\n\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- You can use bash commands or invoke any tool that is available in the environment\n- You can also create new tools or scripts to help you with the task\n- If a tool isn't available, you can also install it\n\n## Submission\n\nWhen you've completed your work, you MUST submit your changes as a git patch.\nFollow these steps IN ORDER, with SEPARATE commands:\n\nStep 1: Create the patch file\nRun `git diff -- path/to/file1 path/to/file2 > patch.txt` listing only the source files you modified.\nDo NOT commit your changes.\n\n<IMPORTANT>\nThe patch must only contain changes to the specific source files you modified to fix the issue.\nDo not submit file creations or changes to any of the following files:\n\n- test and reproduction files\n- helper scripts, tests, or tools that you created\n- installation, build, packaging, configuration, or setup scripts unless they are directly part of the issue you were fixing (you can assume that the environment is already set up for your client)\n- binary or compiled files\n</IMPORTANT>\n\nStep 2: Verify your patch\nInspect patch.txt to confirm it only contains your intended changes and headers show `--- a/` and `+++ b/` paths.\n\nStep 3: Submit (EXACT command required)\nYou MUST use this EXACT command to submit:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt\n```\n\nIf the command fails (nonzero exit status), it will not submit.\n\n<CRITICAL>\n- Creating/viewing the patch and submitting it MUST be separate commands (not combined with &&).\n- If you modify patch.txt after verifying, you SHOULD verify again before submitting.\n- You CANNOT continue working (reading, editing, testing) in any way on this task after submitting.\n</CRITICAL>\n</instructions>\n",
+        "step_limit": 250,
+        "cost_limit": 3.0,
+        "output_path": null
+      },
+      "agent_type": "__main__.ProgressTrackingAgent",
+      "model": {
+        "model_name": "gpt-5.2",
+        "model_kwargs": {
+          "drop_params": true,
+          "temperature": 1,
+          "parallel_tool_calls": true,
+          "max_completion_tokens": 800,
+          "reasoning_effort": "none"
+        },
+        "litellm_model_registry": null,
+        "set_cache_control": null,
+        "cost_tracking": "default",
+        "format_error_template": "Tool call error:\n\n<error>\n{{error}}\n</error>\n\nHere is general guidance on how to submit correct toolcalls:\n\nEvery response needs to use the 'bash' tool at least once to execute commands.\n\nCall the bash tool with your command as the argument:\n- Tool: bash\n- Arguments: {\"command\": \"your_command_here\"}\n\nIf you have completed your assignment, please consult the first message about how to\nsubmit your solution (you will not be able to continue working on this task after that).\n",
+        "observation_template": "{% if output.exception_info -%}\n<exception>{{output.exception_info}}</exception>\n{% endif -%}\n<returncode>{{output.returncode}}</returncode>\n{% if output.output | length < 10000 -%}\n<output>\n{{ output.output -}}\n</output>\n{%- else -%}\n<warning>\nThe output of your last command was too long.\nPlease try a different command that produces less output.\nIf you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.\nIf you're using grep or find and it produced too much output, you can use a more selective search pattern.\nIf you really need to see something from the full command's output, you can redirect output to a file and then search in that file.\n</warning>\n{%- set elided_chars = output.output | length - 10000 -%}\n<output_head>\n{{ output.output[:5000] }}\n</output_head>\n<elided_chars>\n{{ elided_chars }} characters elided\n</elided_chars>\n<output_tail>\n{{ output.output[-5000:] }}\n</output_tail>\n{%- endif -%}\n",
+        "multimodal_regex": ""
+      },
+      "model_type": "minisweagent.models.litellm_model.LitellmModel",
+      "environment": {
+        "image": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-16100:latest",
+        "cwd": "/testbed",
+        "env": {
+          "PAGER": "cat",
+          "MANPAGER": "cat",
+          "LESS": "-R",
+          "PIP_PROGRESS_BAR": "off",
+          "TQDM_DISABLE": "1"
+        },
+        "forward_env": [],
+        "timeout": 60,
+        "executable": "docker",
+        "run_args": [
+          "--rm"
+        ],
+        "container_timeout": "2h",
+        "pull_timeout": 120,
+        "interpreter": [
+          "bash",
+          "-c"
+        ]
+      },
+      "environment_type": "minisweagent.environments.docker.DockerEnvironment"
+    },
+    "mini_version": "2.2.8",
+    "exit_status": "Submitted",
+    "submission": "diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex 5f07a4208a..8d201b8e2a 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -1913,7 +1913,19 @@ class ModelAdmin(BaseModelAdmin):\n     @csrf_protect_m\n     def changelist_view(self, request, extra_context=None):\n         \"\"\"\n-        The 'change list' admin view for this model.\n+        The \"change list\" admin view for this model.\n+        \"\"\"\n+        # Ensure that data modifications are atomic to avoid partial updates\n+        # if an exception is raised while processing a POST request.\n+        if request.method == \"POST\":\n+            with transaction.atomic(using=router.db_for_write(self.model)):\n+                return self._changelist_view(request, extra_context)\n+        return self._changelist_view(request, extra_context)\n+\n+    def _changelist_view(self, request, extra_context=None):\n+        \"\"\"Handle the changelist view.\n+\n+        This exists to allow wrapping POST requests in a transaction.\n         \"\"\"\n         from django.contrib.admin.views.main import ERROR_FLAG\n \n"
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that can interact with a computer shell to solve programming tasks."
+    },
+    {
+      "role": "user",
+      "content": "<pr_description>\nConsider the following PR description:\nAdd transaction handling to Changelist list_editable processing.\nDescription\n\t\nIt seems that changelist_view in Django admin is missing a transaction. Since the view may change data in database, it should be wrapped in a transaction to prevent unexpected states in case of errors.\n\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\n\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n<IMPORTANT>This is an interactive process where you will think and issue AT LEAST ONE command, see the result, then think and issue your next command(s).</important>\n\nFor each response:\n\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide one or more bash tool calls to execute\n\n## Important Boundaries\n\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call. You can make MULTIPLE tool calls in a single response when the commands are independent (e.g., searching multiple files, reading different parts of the codebase).\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the Builder-related code. Let me find relevant files and check the project structure.\n\n[Makes multiple bash tool calls: {\"command\": \"ls -la\"}, {\"command\": \"find src -name '*.java' | grep -i builder\"}, {\"command\": \"cat README.md | head -50\"}]\n</example_response>\n\n## Environment Details\n\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- You can use bash commands or invoke any tool that is available in the environment\n- You can also create new tools or scripts to help you with the task\n- If a tool isn't available, you can also install it\n\n## Submission\n\nWhen you've completed your work, you MUST submit your changes as a git patch.\nFollow these steps IN ORDER, with SEPARATE commands:\n\nStep 1: Create the patch file\nRun `git diff -- path/to/file1 path/to/file2 > patch.txt` listing only the source files you modified.\nDo NOT commit your changes.\n\n<IMPORTANT>\nThe patch must only contain changes to the specific source files you modified to fix the issue.\nDo not submit file creations or changes to any of the following files:\n\n- test and reproduction files\n- helper scripts, tests, or tools that you created\n- installation, build, packaging, configuration, or setup scripts unless they are directly part of the issue you were fixing (you can assume that the environment is already set up for your client)\n- binary or compiled files\n</IMPORTANT>\n\nStep 2: Verify your patch\nInspect patch.txt to confirm it only contains your intended changes and headers show `--- a/` and `+++ b/` paths.\n\nStep 3: Submit (EXACT command required)\nYou MUST use this EXACT command to submit:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt\n```\n\nIf the command fails (nonzero exit status), it will not submit.\n\n<CRITICAL>\n- Creating/viewing the patch and submitting it MUST be separate commands (not combined with &&).\n- If you modify patch.txt after verifying, you SHOULD verify again before submitting.\n- You CANNOT continue working (reading, editing, testing) in any way on this task after submitting.\n</CRITICAL>\n</instructions>"
+    },
+    {
+      "content": "Need wrap Django admin changelist_view list_editable processing in transaction. Let's inspect code.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && ls\"}",
+            "name": "bash"
+          },
+          "id": "call_OXxLKgihSY0aj2sBrwISJVOa",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && ls",
+            "tool_call_id": "call_OXxLKgihSY0aj2sBrwISJVOa"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmLNWAsjU0gcJgOsJNVbKq7LWAq",
+          "created": 1776994673,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "Need wrap Django admin changelist_view list_editable processing in transaction. Let's inspect code.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && ls\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_OXxLKgihSY0aj2sBrwISJVOa",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 47,
+            "prompt_tokens": 1171,
+            "total_tokens": 1218,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0027072499999999996,
+        "timestamp": 1776994674.7283711
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\nAUTHORS\nCONTRIBUTING.rst\nDjango.egg-info\nGruntfile.js\nINSTALL\nLICENSE\nLICENSE.python\nMANIFEST.in\nREADME.rst\ndjango\ndocs\nextras\njs_tests\npackage.json\npyproject.toml\nscripts\nsetup.cfg\nsetup.py\ntests\ntox.ini\n</output>",
+      "extra": {
+        "raw_output": "AUTHORS\nCONTRIBUTING.rst\nDjango.egg-info\nGruntfile.js\nINSTALL\nLICENSE\nLICENSE.python\nMANIFEST.in\nREADME.rst\ndjango\ndocs\nextras\njs_tests\npackage.json\npyproject.toml\nscripts\nsetup.cfg\nsetup.py\ntests\ntox.ini\n",
+        "returncode": 0,
+        "timestamp": 1776994674.785177,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_OXxLKgihSY0aj2sBrwISJVOa",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && rg \\\"def changelist_view\\\" -n django/contrib/admin | head\"}",
+            "name": "bash"
+          },
+          "id": "call_6uPm1HnNp9PvmBicTkRNaWVi",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && rg \"def changelist_view\" -n django/contrib/admin | head",
+            "tool_call_id": "call_6uPm1HnNp9PvmBicTkRNaWVi"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmM1y4lrb8QdxvIHStUl3Tomr9h",
+          "created": 1776994674,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && rg \\\"def changelist_view\\\" -n django/contrib/admin | head\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_6uPm1HnNp9PvmBicTkRNaWVi",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 36,
+            "prompt_tokens": 1309,
+            "total_tokens": 1345,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.00279475,
+        "timestamp": 1776994675.9911351
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\nbash: line 1: rg: command not found\n</output>",
+      "extra": {
+        "raw_output": "bash: line 1: rg: command not found\n",
+        "returncode": 0,
+        "timestamp": 1776994676.046608,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_6uPm1HnNp9PvmBicTkRNaWVi",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && grep -R \\\"def changelist_view\\\" -n django/contrib/admin | head\"}",
+            "name": "bash"
+          },
+          "id": "call_BXTQjs4T1RDoQDSm3pQbUyjr",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && grep -R \"def changelist_view\" -n django/contrib/admin | head",
+            "tool_call_id": "call_BXTQjs4T1RDoQDSm3pQbUyjr"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmOWa8Bhr2vY9FSx7bsdKD61yF2",
+          "created": 1776994676,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && grep -R \\\"def changelist_view\\\" -n django/contrib/admin | head\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_BXTQjs4T1RDoQDSm3pQbUyjr",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 38,
+            "prompt_tokens": 1382,
+            "total_tokens": 1420,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0029505,
+        "timestamp": 1776994676.9802732
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\ndjango/contrib/admin/options.py:1914:    def changelist_view(self, request, extra_context=None):\n</output>",
+      "extra": {
+        "raw_output": "django/contrib/admin/options.py:1914:    def changelist_view(self, request, extra_context=None):\n",
+        "returncode": 0,
+        "timestamp": 1776994677.311493,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_BXTQjs4T1RDoQDSm3pQbUyjr",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && sed -n '1880,2060p' django/contrib/admin/options.py\"}",
+            "name": "bash"
+          },
+          "id": "call_mMPDDP7yroPSUIVVjAGHKdAX",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && sed -n '1880,2060p' django/contrib/admin/options.py",
+            "tool_call_id": "call_mMPDDP7yroPSUIVVjAGHKdAX"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmPztO73PeQyrrIwRCKvF9zSNqr",
+          "created": 1776994677,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && sed -n '1880,2060p' django/contrib/admin/options.py\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_mMPDDP7yroPSUIVVjAGHKdAX",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 38,
+            "prompt_tokens": 1468,
+            "total_tokens": 1506,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 1152
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0012866000000000002,
+        "timestamp": 1776994678.138892
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n        return self.render_change_form(\n            request, context, add=add, change=not add, obj=obj, form_url=form_url\n        )\n\n    def add_view(self, request, form_url=\"\", extra_context=None):\n        return self.changeform_view(request, None, form_url, extra_context)\n\n    def change_view(self, request, object_id, form_url=\"\", extra_context=None):\n        return self.changeform_view(request, object_id, form_url, extra_context)\n\n    def _get_edited_object_pks(self, request, prefix):\n        \"\"\"Return POST data values of list_editable primary keys.\"\"\"\n        pk_pattern = re.compile(\n            r\"{}-\\d+-{}$\".format(re.escape(prefix), self.opts.pk.name)\n        )\n        return [value for key, value in request.POST.items() if pk_pattern.match(key)]\n\n    def _get_list_editable_queryset(self, request, prefix):\n        \"\"\"\n        Based on POST data, return a queryset of the objects that were edited\n        via list_editable.\n        \"\"\"\n        object_pks = self._get_edited_object_pks(request, prefix)\n        queryset = self.get_queryset(request)\n        validate = queryset.model._meta.pk.to_python\n        try:\n            for pk in object_pks:\n                validate(pk)\n        except ValidationError:\n            # Disable the optimization if the POST data was tampered with.\n            return queryset\n        return queryset.filter(pk__in=object_pks)\n\n    @csrf_protect_m\n    def changelist_view(self, request, extra_context=None):\n        \"\"\"\n        The 'change list' admin view for this model.\n        \"\"\"\n        from django.contrib.admin.views.main import ERROR_FLAG\n\n        app_label = self.opts.app_label\n        if not self.has_view_or_change_permission(request):\n            raise PermissionDenied\n\n        try:\n            cl = self.get_changelist_instance(request)\n        except IncorrectLookupParameters:\n            # Wacky lookup parameters were given, so redirect to the main\n            # changelist page, without parameters, and pass an 'invalid=1'\n            # parameter via the query string. If wacky parameters were given\n            # and the 'invalid=1' parameter was already in the query string,\n            # something is screwed up with the database, so display an error\n            # page.\n            if ERROR_FLAG in request.GET:\n                return SimpleTemplateResponse(\n                    \"admin/invalid_setup.html\",\n                    {\n                        \"title\": _(\"Database error\"),\n                    },\n                )\n            return HttpResponseRedirect(request.path + \"?\" + ERROR_FLAG + \"=1\")\n\n        # If the request was POSTed, this might be a bulk action or a bulk\n        # edit. Try to look up an action or confirmation first, but if this\n        # isn't an action the POST will fall through to the bulk edit check,\n        # below.\n        action_failed = False\n        selected = request.POST.getlist(helpers.ACTION_CHECKBOX_NAME)\n\n        actions = self.get_actions(request)\n        # Actions with no confirmation\n        if (\n            actions\n            and request.method == \"POST\"\n            and \"index\" in request.POST\n            and \"_save\" not in request.POST\n        ):\n            if selected:\n                response = self.response_action(\n                    request, queryset=cl.get_queryset(request)\n                )\n                if response:\n                    return response\n                else:\n                    action_failed = True\n            else:\n                msg = _(\n                    \"Items must be selected in order to perform \"\n                    \"actions on them. No items have been changed.\"\n                )\n                self.message_user(request, msg, messages.WARNING)\n                action_failed = True\n\n        # Actions with confirmation\n        if (\n            actions\n            and request.method == \"POST\"\n            and helpers.ACTION_CHECKBOX_NAME in request.POST\n            and \"index\" not in request.POST\n            and \"_save\" not in request.POST\n        ):\n            if selected:\n                response = self.response_action(\n                    request, queryset=cl.get_queryset(request)\n                )\n                if response:\n                    return response\n                else:\n                    action_failed = True\n\n        if action_failed:\n            # Redirect back to the changelist page to avoid resubmitting the\n            # form if the user refreshes the browser or uses the \"No, take\n            # me back\" button on the action confirmation page.\n            return HttpResponseRedirect(request.get_full_path())\n\n        # If we're allowing changelist editing, we need to construct a formset\n        # for the changelist given all the fields to be edited. Then we'll\n        # use the formset to validate/process POSTed data.\n        formset = cl.formset = None\n\n        # Handle POSTed bulk-edit data.\n        if request.method == \"POST\" and cl.list_editable and \"_save\" in request.POST:\n            if not self.has_change_permission(request):\n                raise PermissionDenied\n            FormSet = self.get_changelist_formset(request)\n            modified_objects = self._get_list_editable_queryset(\n                request, FormSet.get_default_prefix()\n            )\n            formset = cl.formset = FormSet(\n                request.POST, request.FILES, queryset=modified_objects\n            )\n            if formset.is_valid():\n                changecount = 0\n                for form in formset.forms:\n                    if form.has_changed():\n                        obj = self.save_form(request, form, change=True)\n                        self.save_model(request, obj, form, change=True)\n                        self.save_related(request, form, formsets=[], change=True)\n                        change_msg = self.construct_change_message(request, form, None)\n                        self.log_change(request, obj, change_msg)\n                        changecount += 1\n\n                if changecount:\n                    msg = ngettext(\n                        \"%(count)s %(name)s was changed successfully.\",\n                        \"%(count)s %(name)s were changed successfully.\",\n                        changecount,\n                    ) % {\n                        \"count\": changecount,\n                        \"name\": model_ngettext(self.opts, changecount),\n                    }\n                    self.message_user(request, msg, messages.SUCCESS)\n\n                return HttpResponseRedirect(request.get_full_path())\n\n        # Handle GET -- construct a formset for display.\n        elif cl.list_editable and self.has_change_permission(request):\n            FormSet = self.get_changelist_formset(request)\n            formset = cl.formset = FormSet(queryset=cl.result_list)\n\n        # Build the list of media to be used by the formset.\n        if formset:\n            media = self.media + formset.media\n        else:\n            media = self.media\n\n        # Build the action form and populate it with available actions.\n        if actions:\n            action_form = self.action_form(auto_id=None)\n            action_form.fields[\"action\"].choices = self.get_action_choices(request)\n            media += action_form.media\n        else:\n            action_form = None\n\n        selection_note_all = ngettext(\n            \"%(total_count)s selected\", \"All %(total_count)s selected\", cl.result_count\n        )\n\n        context = {\n            **self.admin_site.each_context(request),\n</output>",
+      "extra": {
+        "raw_output": "        return self.render_change_form(\n            request, context, add=add, change=not add, obj=obj, form_url=form_url\n        )\n\n    def add_view(self, request, form_url=\"\", extra_context=None):\n        return self.changeform_view(request, None, form_url, extra_context)\n\n    def change_view(self, request, object_id, form_url=\"\", extra_context=None):\n        return self.changeform_view(request, object_id, form_url, extra_context)\n\n    def _get_edited_object_pks(self, request, prefix):\n        \"\"\"Return POST data values of list_editable primary keys.\"\"\"\n        pk_pattern = re.compile(\n            r\"{}-\\d+-{}$\".format(re.escape(prefix), self.opts.pk.name)\n        )\n        return [value for key, value in request.POST.items() if pk_pattern.match(key)]\n\n    def _get_list_editable_queryset(self, request, prefix):\n        \"\"\"\n        Based on POST data, return a queryset of the objects that were edited\n        via list_editable.\n        \"\"\"\n        object_pks = self._get_edited_object_pks(request, prefix)\n        queryset = self.get_queryset(request)\n        validate = queryset.model._meta.pk.to_python\n        try:\n            for pk in object_pks:\n                validate(pk)\n        except ValidationError:\n            # Disable the optimization if the POST data was tampered with.\n            return queryset\n        return queryset.filter(pk__in=object_pks)\n\n    @csrf_protect_m\n    def changelist_view(self, request, extra_context=None):\n        \"\"\"\n        The 'change list' admin view for this model.\n        \"\"\"\n        from django.contrib.admin.views.main import ERROR_FLAG\n\n        app_label = self.opts.app_label\n        if not self.has_view_or_change_permission(request):\n            raise PermissionDenied\n\n        try:\n            cl = self.get_changelist_instance(request)\n        except IncorrectLookupParameters:\n            # Wacky lookup parameters were given, so redirect to the main\n            # changelist page, without parameters, and pass an 'invalid=1'\n            # parameter via the query string. If wacky parameters were given\n            # and the 'invalid=1' parameter was already in the query string,\n            # something is screwed up with the database, so display an error\n            # page.\n            if ERROR_FLAG in request.GET:\n                return SimpleTemplateResponse(\n                    \"admin/invalid_setup.html\",\n                    {\n                        \"title\": _(\"Database error\"),\n                    },\n                )\n            return HttpResponseRedirect(request.path + \"?\" + ERROR_FLAG + \"=1\")\n\n        # If the request was POSTed, this might be a bulk action or a bulk\n        # edit. Try to look up an action or confirmation first, but if this\n        # isn't an action the POST will fall through to the bulk edit check,\n        # below.\n        action_failed = False\n        selected = request.POST.getlist(helpers.ACTION_CHECKBOX_NAME)\n\n        actions = self.get_actions(request)\n        # Actions with no confirmation\n        if (\n            actions\n            and request.method == \"POST\"\n            and \"index\" in request.POST\n            and \"_save\" not in request.POST\n        ):\n            if selected:\n                response = self.response_action(\n                    request, queryset=cl.get_queryset(request)\n                )\n                if response:\n                    return response\n                else:\n                    action_failed = True\n            else:\n                msg = _(\n                    \"Items must be selected in order to perform \"\n                    \"actions on them. No items have been changed.\"\n                )\n                self.message_user(request, msg, messages.WARNING)\n                action_failed = True\n\n        # Actions with confirmation\n        if (\n            actions\n            and request.method == \"POST\"\n            and helpers.ACTION_CHECKBOX_NAME in request.POST\n            and \"index\" not in request.POST\n            and \"_save\" not in request.POST\n        ):\n            if selected:\n                response = self.response_action(\n                    request, queryset=cl.get_queryset(request)\n                )\n                if response:\n                    return response\n                else:\n                    action_failed = True\n\n        if action_failed:\n            # Redirect back to the changelist page to avoid resubmitting the\n            # form if the user refreshes the browser or uses the \"No, take\n            # me back\" button on the action confirmation page.\n            return HttpResponseRedirect(request.get_full_path())\n\n        # If we're allowing changelist editing, we need to construct a formset\n        # for the changelist given all the fields to be edited. Then we'll\n        # use the formset to validate/process POSTed data.\n        formset = cl.formset = None\n\n        # Handle POSTed bulk-edit data.\n        if request.method == \"POST\" and cl.list_editable and \"_save\" in request.POST:\n            if not self.has_change_permission(request):\n                raise PermissionDenied\n            FormSet = self.get_changelist_formset(request)\n            modified_objects = self._get_list_editable_queryset(\n                request, FormSet.get_default_prefix()\n            )\n            formset = cl.formset = FormSet(\n                request.POST, request.FILES, queryset=modified_objects\n            )\n            if formset.is_valid():\n                changecount = 0\n                for form in formset.forms:\n                    if form.has_changed():\n                        obj = self.save_form(request, form, change=True)\n                        self.save_model(request, obj, form, change=True)\n                        self.save_related(request, form, formsets=[], change=True)\n                        change_msg = self.construct_change_message(request, form, None)\n                        self.log_change(request, obj, change_msg)\n                        changecount += 1\n\n                if changecount:\n                    msg = ngettext(\n                        \"%(count)s %(name)s was changed successfully.\",\n                        \"%(count)s %(name)s were changed successfully.\",\n                        changecount,\n                    ) % {\n                        \"count\": changecount,\n                        \"name\": model_ngettext(self.opts, changecount),\n                    }\n                    self.message_user(request, msg, messages.SUCCESS)\n\n                return HttpResponseRedirect(request.get_full_path())\n\n        # Handle GET -- construct a formset for display.\n        elif cl.list_editable and self.has_change_permission(request):\n            FormSet = self.get_changelist_formset(request)\n            formset = cl.formset = FormSet(queryset=cl.result_list)\n\n        # Build the list of media to be used by the formset.\n        if formset:\n            media = self.media + formset.media\n        else:\n            media = self.media\n\n        # Build the action form and populate it with available actions.\n        if actions:\n            action_form = self.action_form(auto_id=None)\n            action_form.fields[\"action\"].choices = self.get_action_choices(request)\n            media += action_form.media\n        else:\n            action_form = None\n\n        selection_note_all = ngettext(\n            \"%(total_count)s selected\", \"All %(total_count)s selected\", cl.result_count\n        )\n\n        context = {\n            **self.admin_site.each_context(request),\n",
+        "returncode": 0,
+        "timestamp": 1776994678.1937933,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_mMPDDP7yroPSUIVVjAGHKdAX",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && sed -n '2060,2240p' django/contrib/admin/options.py\"}",
+            "name": "bash"
+          },
+          "id": "call_qZPOug8F0czq1oXrqG7NzeWO",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && sed -n '2060,2240p' django/contrib/admin/options.py",
+            "tool_call_id": "call_qZPOug8F0czq1oXrqG7NzeWO"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmQKug50SddTxmD4rBzuKTlnHvF",
+          "created": 1776994678,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && sed -n '2060,2240p' django/contrib/admin/options.py\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_qZPOug8F0czq1oXrqG7NzeWO",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 38,
+            "prompt_tokens": 2980,
+            "total_tokens": 3018,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 1280
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0037309999999999995,
+        "timestamp": 1776994679.2130632
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n            **self.admin_site.each_context(request),\n            \"module_name\": str(self.opts.verbose_name_plural),\n            \"selection_note\": _(\"0 of %(cnt)s selected\") % {\"cnt\": len(cl.result_list)},\n            \"selection_note_all\": selection_note_all % {\"total_count\": cl.result_count},\n            \"title\": cl.title,\n            \"subtitle\": None,\n            \"is_popup\": cl.is_popup,\n            \"to_field\": cl.to_field,\n            \"cl\": cl,\n            \"media\": media,\n            \"has_add_permission\": self.has_add_permission(request),\n            \"opts\": cl.opts,\n            \"action_form\": action_form,\n            \"actions_on_top\": self.actions_on_top,\n            \"actions_on_bottom\": self.actions_on_bottom,\n            \"actions_selection_counter\": self.actions_selection_counter,\n            \"preserved_filters\": self.get_preserved_filters(request),\n            **(extra_context or {}),\n        }\n\n        request.current_app = self.admin_site.name\n\n        return TemplateResponse(\n            request,\n            self.change_list_template\n            or [\n                \"admin/%s/%s/change_list.html\" % (app_label, self.opts.model_name),\n                \"admin/%s/change_list.html\" % app_label,\n                \"admin/change_list.html\",\n            ],\n            context,\n        )\n\n    def get_deleted_objects(self, objs, request):\n        \"\"\"\n        Hook for customizing the delete process for the delete view and the\n        \"delete selected\" action.\n        \"\"\"\n        return get_deleted_objects(objs, request, self.admin_site)\n\n    @csrf_protect_m\n    def delete_view(self, request, object_id, extra_context=None):\n        with transaction.atomic(using=router.db_for_write(self.model)):\n            return self._delete_view(request, object_id, extra_context)\n\n    def _delete_view(self, request, object_id, extra_context):\n        \"The 'delete' admin view for this model.\"\n        app_label = self.opts.app_label\n\n        to_field = request.POST.get(TO_FIELD_VAR, request.GET.get(TO_FIELD_VAR))\n        if to_field and not self.to_field_allowed(request, to_field):\n            raise DisallowedModelAdminToField(\n                \"The field %s cannot be referenced.\" % to_field\n            )\n\n        obj = self.get_object(request, unquote(object_id), to_field)\n\n        if not self.has_delete_permission(request, obj):\n            raise PermissionDenied\n\n        if obj is None:\n            return self._get_obj_does_not_exist_redirect(request, self.opts, object_id)\n\n        # Populate deleted_objects, a data structure of all related objects that\n        # will also be deleted.\n        (\n            deleted_objects,\n            model_count,\n            perms_needed,\n            protected,\n        ) = self.get_deleted_objects([obj], request)\n\n        if request.POST and not protected:  # The user has confirmed the deletion.\n            if perms_needed:\n                raise PermissionDenied\n            obj_display = str(obj)\n            attr = str(to_field) if to_field else self.opts.pk.attname\n            obj_id = obj.serializable_value(attr)\n            self.log_deletion(request, obj, obj_display)\n            self.delete_model(request, obj)\n\n            return self.response_delete(request, obj_display, obj_id)\n\n        object_name = str(self.opts.verbose_name)\n\n        if perms_needed or protected:\n            title = _(\"Cannot delete %(name)s\") % {\"name\": object_name}\n        else:\n            title = _(\"Are you sure?\")\n\n        context = {\n            **self.admin_site.each_context(request),\n            \"title\": title,\n            \"subtitle\": None,\n            \"object_name\": object_name,\n            \"object\": obj,\n            \"deleted_objects\": deleted_objects,\n            \"model_count\": dict(model_count).items(),\n            \"perms_lacking\": perms_needed,\n            \"protected\": protected,\n            \"opts\": self.opts,\n            \"app_label\": app_label,\n            \"preserved_filters\": self.get_preserved_filters(request),\n            \"is_popup\": IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET,\n            \"to_field\": to_field,\n            **(extra_context or {}),\n        }\n\n        return self.render_delete_form(request, context)\n\n    def history_view(self, request, object_id, extra_context=None):\n        \"The 'history' admin view for this model.\"\n        from django.contrib.admin.models import LogEntry\n        from django.contrib.admin.views.main import PAGE_VAR\n\n        # First check if the user can see this history.\n        model = self.model\n        obj = self.get_object(request, unquote(object_id))\n        if obj is None:\n            return self._get_obj_does_not_exist_redirect(\n                request, model._meta, object_id\n            )\n\n        if not self.has_view_or_change_permission(request, obj):\n            raise PermissionDenied\n\n        # Then get the history for this object.\n        app_label = self.opts.app_label\n        action_list = (\n            LogEntry.objects.filter(\n                object_id=unquote(object_id),\n                content_type=get_content_type_for_model(model),\n            )\n            .select_related()\n            .order_by(\"action_time\")\n        )\n\n        paginator = self.get_paginator(request, action_list, 100)\n        page_number = request.GET.get(PAGE_VAR, 1)\n        page_obj = paginator.get_page(page_number)\n        page_range = paginator.get_elided_page_range(page_obj.number)\n\n        context = {\n            **self.admin_site.each_context(request),\n            \"title\": _(\"Change history: %s\") % obj,\n            \"subtitle\": None,\n            \"action_list\": page_obj,\n            \"page_range\": page_range,\n            \"page_var\": PAGE_VAR,\n            \"pagination_required\": paginator.count > 100,\n            \"module_name\": str(capfirst(self.opts.verbose_name_plural)),\n            \"object\": obj,\n            \"opts\": self.opts,\n            \"preserved_filters\": self.get_preserved_filters(request),\n            **(extra_context or {}),\n        }\n\n        request.current_app = self.admin_site.name\n\n        return TemplateResponse(\n            request,\n            self.object_history_template\n            or [\n                \"admin/%s/%s/object_history.html\" % (app_label, self.opts.model_name),\n                \"admin/%s/object_history.html\" % app_label,\n                \"admin/object_history.html\",\n            ],\n            context,\n        )\n\n    def get_formset_kwargs(self, request, obj, inline, prefix):\n        formset_params = {\n            \"instance\": obj,\n            \"prefix\": prefix,\n            \"queryset\": inline.get_queryset(request),\n        }\n        if request.method == \"POST\":\n            formset_params.update(\n                {\n                    \"data\": request.POST.copy(),\n                    \"files\": request.FILES,\n</output>",
+      "extra": {
+        "raw_output": "            **self.admin_site.each_context(request),\n            \"module_name\": str(self.opts.verbose_name_plural),\n            \"selection_note\": _(\"0 of %(cnt)s selected\") % {\"cnt\": len(cl.result_list)},\n            \"selection_note_all\": selection_note_all % {\"total_count\": cl.result_count},\n            \"title\": cl.title,\n            \"subtitle\": None,\n            \"is_popup\": cl.is_popup,\n            \"to_field\": cl.to_field,\n            \"cl\": cl,\n            \"media\": media,\n            \"has_add_permission\": self.has_add_permission(request),\n            \"opts\": cl.opts,\n            \"action_form\": action_form,\n            \"actions_on_top\": self.actions_on_top,\n            \"actions_on_bottom\": self.actions_on_bottom,\n            \"actions_selection_counter\": self.actions_selection_counter,\n            \"preserved_filters\": self.get_preserved_filters(request),\n            **(extra_context or {}),\n        }\n\n        request.current_app = self.admin_site.name\n\n        return TemplateResponse(\n            request,\n            self.change_list_template\n            or [\n                \"admin/%s/%s/change_list.html\" % (app_label, self.opts.model_name),\n                \"admin/%s/change_list.html\" % app_label,\n                \"admin/change_list.html\",\n            ],\n            context,\n        )\n\n    def get_deleted_objects(self, objs, request):\n        \"\"\"\n        Hook for customizing the delete process for the delete view and the\n        \"delete selected\" action.\n        \"\"\"\n        return get_deleted_objects(objs, request, self.admin_site)\n\n    @csrf_protect_m\n    def delete_view(self, request, object_id, extra_context=None):\n        with transaction.atomic(using=router.db_for_write(self.model)):\n            return self._delete_view(request, object_id, extra_context)\n\n    def _delete_view(self, request, object_id, extra_context):\n        \"The 'delete' admin view for this model.\"\n        app_label = self.opts.app_label\n\n        to_field = request.POST.get(TO_FIELD_VAR, request.GET.get(TO_FIELD_VAR))\n        if to_field and not self.to_field_allowed(request, to_field):\n            raise DisallowedModelAdminToField(\n                \"The field %s cannot be referenced.\" % to_field\n            )\n\n        obj = self.get_object(request, unquote(object_id), to_field)\n\n        if not self.has_delete_permission(request, obj):\n            raise PermissionDenied\n\n        if obj is None:\n            return self._get_obj_does_not_exist_redirect(request, self.opts, object_id)\n\n        # Populate deleted_objects, a data structure of all related objects that\n        # will also be deleted.\n        (\n            deleted_objects,\n            model_count,\n            perms_needed,\n            protected,\n        ) = self.get_deleted_objects([obj], request)\n\n        if request.POST and not protected:  # The user has confirmed the deletion.\n            if perms_needed:\n                raise PermissionDenied\n            obj_display = str(obj)\n            attr = str(to_field) if to_field else self.opts.pk.attname\n            obj_id = obj.serializable_value(attr)\n            self.log_deletion(request, obj, obj_display)\n            self.delete_model(request, obj)\n\n            return self.response_delete(request, obj_display, obj_id)\n\n        object_name = str(self.opts.verbose_name)\n\n        if perms_needed or protected:\n            title = _(\"Cannot delete %(name)s\") % {\"name\": object_name}\n        else:\n            title = _(\"Are you sure?\")\n\n        context = {\n            **self.admin_site.each_context(request),\n            \"title\": title,\n            \"subtitle\": None,\n            \"object_name\": object_name,\n            \"object\": obj,\n            \"deleted_objects\": deleted_objects,\n            \"model_count\": dict(model_count).items(),\n            \"perms_lacking\": perms_needed,\n            \"protected\": protected,\n            \"opts\": self.opts,\n            \"app_label\": app_label,\n            \"preserved_filters\": self.get_preserved_filters(request),\n            \"is_popup\": IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET,\n            \"to_field\": to_field,\n            **(extra_context or {}),\n        }\n\n        return self.render_delete_form(request, context)\n\n    def history_view(self, request, object_id, extra_context=None):\n        \"The 'history' admin view for this model.\"\n        from django.contrib.admin.models import LogEntry\n        from django.contrib.admin.views.main import PAGE_VAR\n\n        # First check if the user can see this history.\n        model = self.model\n        obj = self.get_object(request, unquote(object_id))\n        if obj is None:\n            return self._get_obj_does_not_exist_redirect(\n                request, model._meta, object_id\n            )\n\n        if not self.has_view_or_change_permission(request, obj):\n            raise PermissionDenied\n\n        # Then get the history for this object.\n        app_label = self.opts.app_label\n        action_list = (\n            LogEntry.objects.filter(\n                object_id=unquote(object_id),\n                content_type=get_content_type_for_model(model),\n            )\n            .select_related()\n            .order_by(\"action_time\")\n        )\n\n        paginator = self.get_paginator(request, action_list, 100)\n        page_number = request.GET.get(PAGE_VAR, 1)\n        page_obj = paginator.get_page(page_number)\n        page_range = paginator.get_elided_page_range(page_obj.number)\n\n        context = {\n            **self.admin_site.each_context(request),\n            \"title\": _(\"Change history: %s\") % obj,\n            \"subtitle\": None,\n            \"action_list\": page_obj,\n            \"page_range\": page_range,\n            \"page_var\": PAGE_VAR,\n            \"pagination_required\": paginator.count > 100,\n            \"module_name\": str(capfirst(self.opts.verbose_name_plural)),\n            \"object\": obj,\n            \"opts\": self.opts,\n            \"preserved_filters\": self.get_preserved_filters(request),\n            **(extra_context or {}),\n        }\n\n        request.current_app = self.admin_site.name\n\n        return TemplateResponse(\n            request,\n            self.object_history_template\n            or [\n                \"admin/%s/%s/object_history.html\" % (app_label, self.opts.model_name),\n                \"admin/%s/object_history.html\" % app_label,\n                \"admin/object_history.html\",\n            ],\n            context,\n        )\n\n    def get_formset_kwargs(self, request, obj, inline, prefix):\n        formset_params = {\n            \"instance\": obj,\n            \"prefix\": prefix,\n            \"queryset\": inline.get_queryset(request),\n        }\n        if request.method == \"POST\":\n            formset_params.update(\n                {\n                    \"data\": request.POST.copy(),\n                    \"files\": request.FILES,\n",
+        "returncode": 0,
+        "timestamp": 1776994679.2660449,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_qZPOug8F0czq1oXrqG7NzeWO",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && apply_patch<<'PATCH'\\n*** Begin Patch\\n*** Update File: django/contrib/admin/options.py\\n@@\\n     @csrf_protect_m\\n     def changelist_view(self, request, extra_context=None):\\n         \\\"\\\"\\\"\\n         The 'change list' admin view for this model.\\n         \\\"\\\"\\\"\\n         from django.contrib.admin.views.main import ERROR_FLAG\\n+\\n+        # The changelist view may change data via actions or list_editable.\\n+        # Ensure that data modifications are atomic to avoid partial updates\\n+        # if an exception is raised while processing a POST request.\\n+        if request.method == \\\"POST\\\":\\n+            with transaction.atomic(using=router.db_for_write(self.model)):\\n+                return self._changelist_view(request, extra_context)\\n+\\n+        return self._changelist_view(request, extra_context)\\n+\\n+    def _changelist_view(self, request, extra_context=None):\\n+        \\\"\\\"\\\"Handle the changelist view.\\n+\\n+        This exists to allow wrapping POST requests in a transaction.\\n+        \\\"\\\"\\\"\\n+\\n+        from django.contrib.admin.views.main import ERROR_FLAG\\n \\n         app_label = self.opts.app_label\\n         if not self.has_view_or_change_permission(request):\\n             raise PermissionDenied\\n*** End Patch\\nPATCH\"}",
+            "name": "bash"
+          },
+          "id": "call_KIIOnZQPgq6lnX92iC9ZuzuC",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && apply_patch<<'PATCH'\n*** Begin Patch\n*** Update File: django/contrib/admin/options.py\n@@\n     @csrf_protect_m\n     def changelist_view(self, request, extra_context=None):\n         \"\"\"\n         The 'change list' admin view for this model.\n         \"\"\"\n         from django.contrib.admin.views.main import ERROR_FLAG\n+\n+        # The changelist view may change data via actions or list_editable.\n+        # Ensure that data modifications are atomic to avoid partial updates\n+        # if an exception is raised while processing a POST request.\n+        if request.method == \"POST\":\n+            with transaction.atomic(using=router.db_for_write(self.model)):\n+                return self._changelist_view(request, extra_context)\n+\n+        return self._changelist_view(request, extra_context)\n+\n+    def _changelist_view(self, request, extra_context=None):\n+        \"\"\"Handle the changelist view.\n+\n+        This exists to allow wrapping POST requests in a transaction.\n+        \"\"\"\n+\n+        from django.contrib.admin.views.main import ERROR_FLAG\n \n         app_label = self.opts.app_label\n         if not self.has_view_or_change_permission(request):\n             raise PermissionDenied\n*** End Patch\nPATCH",
+            "tool_call_id": "call_KIIOnZQPgq6lnX92iC9ZuzuC"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmRJou78Z8eLWKrGplM4r3HDSJu",
+          "created": 1776994679,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && apply_patch<<'PATCH'\\n*** Begin Patch\\n*** Update File: django/contrib/admin/options.py\\n@@\\n     @csrf_protect_m\\n     def changelist_view(self, request, extra_context=None):\\n         \\\"\\\"\\\"\\n         The 'change list' admin view for this model.\\n         \\\"\\\"\\\"\\n         from django.contrib.admin.views.main import ERROR_FLAG\\n+\\n+        # The changelist view may change data via actions or list_editable.\\n+        # Ensure that data modifications are atomic to avoid partial updates\\n+        # if an exception is raised while processing a POST request.\\n+        if request.method == \\\"POST\\\":\\n+            with transaction.atomic(using=router.db_for_write(self.model)):\\n+                return self._changelist_view(request, extra_context)\\n+\\n+        return self._changelist_view(request, extra_context)\\n+\\n+    def _changelist_view(self, request, extra_context=None):\\n+        \\\"\\\"\\\"Handle the changelist view.\\n+\\n+        This exists to allow wrapping POST requests in a transaction.\\n+        \\\"\\\"\\\"\\n+\\n+        from django.contrib.admin.views.main import ERROR_FLAG\\n \\n         app_label = self.opts.app_label\\n         if not self.has_view_or_change_permission(request):\\n             raise PermissionDenied\\n*** End Patch\\nPATCH\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_KIIOnZQPgq6lnX92iC9ZuzuC",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 312,
+            "prompt_tokens": 4413,
+            "total_tokens": 4725,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 2944
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.007453950000000001,
+        "timestamp": 1776994683.2273617
+      }
+    },
+    {
+      "content": "<returncode>127</returncode>\n<output>\nbash: line 1: apply_patch: command not found\n</output>",
+      "extra": {
+        "raw_output": "bash: line 1: apply_patch: command not found\n",
+        "returncode": 127,
+        "timestamp": 1776994683.2808964,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_KIIOnZQPgq6lnX92iC9ZuzuC",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && python - <<'PY'\\nimport io,sys\\nfrom pathlib import Path\\npath=Path('django/contrib/admin/options.py')\\ntext=path.read_text()\\nold='''    @csrf_protect_m\\n    def changelist_view(self, request, extra_context=None):\\n        \\\"\\\"\\\"\\n        The 'change list' admin view for this model.\\n        \\\"\\\"\\\"\\n        from django.contrib.admin.views.main import ERROR_FLAG\\n'''\\nnew='''    @csrf_protect_m\\n    def changelist_view(self, request, extra_context=None):\\n        \\\"\\\"\\\"\\\\\\n        The 'change list' admin view for this model.\\n        \\\"\\\"\\\"\\n        # The changelist view may change data via actions or list_editable.\\n        # Ensure that data modifications are atomic to avoid partial updates\\n        # if an exception is raised while processing a POST request.\\n        if request.method == \\\"POST\\\":\\n            with transaction.atomic(using=router.db_for_write(self.model)):\\n                return self._changelist_view(request, extra_context)\\n        return self._changelist_view(request, extra_context)\\n\\n    def _changelist_view(self, request, extra_context=None):\\n        \\\"\\\"\\\"Handle the changelist view.\\n\\n        This exists to allow wrapping POST requests in a transaction.\\n        \\\"\\\"\\\"\\n        from django.contrib.admin.views.main import ERROR_FLAG\\n'''\\nif old not in text:\\n    raise SystemExit('Target snippet not found')\\npath.write_text(text.replace(old,new,1))\\nprint('updated')\\nPY\"}",
+            "name": "bash"
+          },
+          "id": "call_7ZJBB5Ja83LWsG92rBxvCAHf",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && python - <<'PY'\nimport io,sys\nfrom pathlib import Path\npath=Path('django/contrib/admin/options.py')\ntext=path.read_text()\nold='''    @csrf_protect_m\n    def changelist_view(self, request, extra_context=None):\n        \"\"\"\n        The 'change list' admin view for this model.\n        \"\"\"\n        from django.contrib.admin.views.main import ERROR_FLAG\n'''\nnew='''    @csrf_protect_m\n    def changelist_view(self, request, extra_context=None):\n        \"\"\"\\\n        The 'change list' admin view for this model.\n        \"\"\"\n        # The changelist view may change data via actions or list_editable.\n        # Ensure that data modifications are atomic to avoid partial updates\n        # if an exception is raised while processing a POST request.\n        if request.method == \"POST\":\n            with transaction.atomic(using=router.db_for_write(self.model)):\n                return self._changelist_view(request, extra_context)\n        return self._changelist_view(request, extra_context)\n\n    def _changelist_view(self, request, extra_context=None):\n        \"\"\"Handle the changelist view.\n\n        This exists to allow wrapping POST requests in a transaction.\n        \"\"\"\n        from django.contrib.admin.views.main import ERROR_FLAG\n'''\nif old not in text:\n    raise SystemExit('Target snippet not found')\npath.write_text(text.replace(old,new,1))\nprint('updated')\nPY",
+            "tool_call_id": "call_7ZJBB5Ja83LWsG92rBxvCAHf"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmVxsaAxdhwlxThSVusdPhYNKOu",
+          "created": 1776994683,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && python - <<'PY'\\nimport io,sys\\nfrom pathlib import Path\\npath=Path('django/contrib/admin/options.py')\\ntext=path.read_text()\\nold='''    @csrf_protect_m\\n    def changelist_view(self, request, extra_context=None):\\n        \\\"\\\"\\\"\\n        The 'change list' admin view for this model.\\n        \\\"\\\"\\\"\\n        from django.contrib.admin.views.main import ERROR_FLAG\\n'''\\nnew='''    @csrf_protect_m\\n    def changelist_view(self, request, extra_context=None):\\n        \\\"\\\"\\\"\\\\\\n        The 'change list' admin view for this model.\\n        \\\"\\\"\\\"\\n        # The changelist view may change data via actions or list_editable.\\n        # Ensure that data modifications are atomic to avoid partial updates\\n        # if an exception is raised while processing a POST request.\\n        if request.method == \\\"POST\\\":\\n            with transaction.atomic(using=router.db_for_write(self.model)):\\n                return self._changelist_view(request, extra_context)\\n        return self._changelist_view(request, extra_context)\\n\\n    def _changelist_view(self, request, extra_context=None):\\n        \\\"\\\"\\\"Handle the changelist view.\\n\\n        This exists to allow wrapping POST requests in a transaction.\\n        \\\"\\\"\\\"\\n        from django.contrib.admin.views.main import ERROR_FLAG\\n'''\\nif old not in text:\\n    raise SystemExit('Target snippet not found')\\npath.write_text(text.replace(old,new,1))\\nprint('updated')\\nPY\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_7ZJBB5Ja83LWsG92rBxvCAHf",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 367,
+            "prompt_tokens": 4763,
+            "total_tokens": 5130,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 4608
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.00621565,
+        "timestamp": 1776994687.2928975
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\nupdated\n</output>",
+      "extra": {
+        "raw_output": "updated\n",
+        "returncode": 0,
+        "timestamp": 1776994687.370661,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_7ZJBB5Ja83LWsG92rBxvCAHf",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && python -m compileall -q django/contrib/admin/options.py\"}",
+            "name": "bash"
+          },
+          "id": "call_zF7xAhueOQ8JtWjoF5q519Mu",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && python -m compileall -q django/contrib/admin/options.py",
+            "tool_call_id": "call_zF7xAhueOQ8JtWjoF5q519Mu"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmZ8GUD20E0fmDxjkxZzy2bJjAl",
+          "created": 1776994687,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && python -m compileall -q django/contrib/admin/options.py\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_zF7xAhueOQ8JtWjoF5q519Mu",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 34,
+            "prompt_tokens": 5157,
+            "total_tokens": 5191,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 4992
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0016383499999999998,
+        "timestamp": 1776994688.3236916
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n</output>",
+      "extra": {
+        "raw_output": "",
+        "returncode": 0,
+        "timestamp": 1776994688.422077,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_zF7xAhueOQ8JtWjoF5q519Mu",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && grep -n \\\"def changelist_view\\\" -n django/contrib/admin/options.py | head\"}",
+            "name": "bash"
+          },
+          "id": "call_lEBOyuaLMwu1p7Eo7juhuZgX",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && grep -n \"def changelist_view\" -n django/contrib/admin/options.py | head",
+            "tool_call_id": "call_lEBOyuaLMwu1p7Eo7juhuZgX"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmaL8j7mbgPW5TIvEZGgVZ8d4N7",
+          "created": 1776994688,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && grep -n \\\"def changelist_view\\\" -n django/contrib/admin/options.py | head\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_lEBOyuaLMwu1p7Eo7juhuZgX",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 40,
+            "prompt_tokens": 5216,
+            "total_tokens": 5256,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 1280
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.007672,
+        "timestamp": 1776994689.6014025
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n1914:    def changelist_view(self, request, extra_context=None):\n</output>",
+      "extra": {
+        "raw_output": "1914:    def changelist_view(self, request, extra_context=None):\n",
+        "returncode": 0,
+        "timestamp": 1776994689.655699,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_lEBOyuaLMwu1p7Eo7juhuZgX",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && sed -n '1908,1945p' django/contrib/admin/options.py\"}",
+            "name": "bash"
+          },
+          "id": "call_hNa5jk271UDuesOhhuwaAMTn",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && sed -n '1908,1945p' django/contrib/admin/options.py",
+            "tool_call_id": "call_hNa5jk271UDuesOhhuwaAMTn"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmb5p1mTjT0xU7mySGimB2nUy2Q",
+          "created": 1776994689,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && sed -n '1908,1945p' django/contrib/admin/options.py\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_hNa5jk271UDuesOhhuwaAMTn",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 38,
+            "prompt_tokens": 5297,
+            "total_tokens": 5335,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 5120
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0017377500000000001,
+        "timestamp": 1776994691.1685085
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n        except ValidationError:\n            # Disable the optimization if the POST data was tampered with.\n            return queryset\n        return queryset.filter(pk__in=object_pks)\n\n    @csrf_protect_m\n    def changelist_view(self, request, extra_context=None):\n        \"\"\"        The 'change list' admin view for this model.\n        \"\"\"\n        # The changelist view may change data via actions or list_editable.\n        # Ensure that data modifications are atomic to avoid partial updates\n        # if an exception is raised while processing a POST request.\n        if request.method == \"POST\":\n            with transaction.atomic(using=router.db_for_write(self.model)):\n                return self._changelist_view(request, extra_context)\n        return self._changelist_view(request, extra_context)\n\n    def _changelist_view(self, request, extra_context=None):\n        \"\"\"Handle the changelist view.\n\n        This exists to allow wrapping POST requests in a transaction.\n        \"\"\"\n        from django.contrib.admin.views.main import ERROR_FLAG\n\n        app_label = self.opts.app_label\n        if not self.has_view_or_change_permission(request):\n            raise PermissionDenied\n\n        try:\n            cl = self.get_changelist_instance(request)\n        except IncorrectLookupParameters:\n            # Wacky lookup parameters were given, so redirect to the main\n            # changelist page, without parameters, and pass an 'invalid=1'\n            # parameter via the query string. If wacky parameters were given\n            # and the 'invalid=1' parameter was already in the query string,\n            # something is screwed up with the database, so display an error\n            # page.\n            if ERROR_FLAG in request.GET:\n</output>",
+      "extra": {
+        "raw_output": "        except ValidationError:\n            # Disable the optimization if the POST data was tampered with.\n            return queryset\n        return queryset.filter(pk__in=object_pks)\n\n    @csrf_protect_m\n    def changelist_view(self, request, extra_context=None):\n        \"\"\"        The 'change list' admin view for this model.\n        \"\"\"\n        # The changelist view may change data via actions or list_editable.\n        # Ensure that data modifications are atomic to avoid partial updates\n        # if an exception is raised while processing a POST request.\n        if request.method == \"POST\":\n            with transaction.atomic(using=router.db_for_write(self.model)):\n                return self._changelist_view(request, extra_context)\n        return self._changelist_view(request, extra_context)\n\n    def _changelist_view(self, request, extra_context=None):\n        \"\"\"Handle the changelist view.\n\n        This exists to allow wrapping POST requests in a transaction.\n        \"\"\"\n        from django.contrib.admin.views.main import ERROR_FLAG\n\n        app_label = self.opts.app_label\n        if not self.has_view_or_change_permission(request):\n            raise PermissionDenied\n\n        try:\n            cl = self.get_changelist_instance(request)\n        except IncorrectLookupParameters:\n            # Wacky lookup parameters were given, so redirect to the main\n            # changelist page, without parameters, and pass an 'invalid=1'\n            # parameter via the query string. If wacky parameters were given\n            # and the 'invalid=1' parameter was already in the query string,\n            # something is screwed up with the database, so display an error\n            # page.\n            if ERROR_FLAG in request.GET:\n",
+        "returncode": 0,
+        "timestamp": 1776994691.2216725,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_hNa5jk271UDuesOhhuwaAMTn",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && python - <<'PY'\\nfrom pathlib import Path\\np=Path('django/contrib/admin/options.py')\\nlines=p.read_text().splitlines()\\nfor i,l in enumerate(lines):\\n    if 'def changelist_view' in l:\\n        start=i\\n        break\\n# fix docstring lines start+1.. start+2\\nlines[start+1]='        \\\"\\\"\\\"'\\nlines[start+2]='        The \\\\\\\"change list\\\\\\\" admin view for this model.'\\nlines[start+3]='        \\\"\\\"\\\"'\\np.write_text('\\\\n'.join(lines)+\\\"\\\\n\\\")\\nprint('fixed docstring')\\nPY\"}",
+            "name": "bash"
+          },
+          "id": "call_SQKFOyQ6pWqSOsgbymz2NjM3",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && python - <<'PY'\nfrom pathlib import Path\np=Path('django/contrib/admin/options.py')\nlines=p.read_text().splitlines()\nfor i,l in enumerate(lines):\n    if 'def changelist_view' in l:\n        start=i\n        break\n# fix docstring lines start+1.. start+2\nlines[start+1]='        \"\"\"'\nlines[start+2]='        The \\\"change list\\\" admin view for this model.'\nlines[start+3]='        \"\"\"'\np.write_text('\\n'.join(lines)+\"\\n\")\nprint('fixed docstring')\nPY",
+            "tool_call_id": "call_SQKFOyQ6pWqSOsgbymz2NjM3"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmddS7b8YFalgIDtiOGpHpj8Ubx",
+          "created": 1776994691,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && python - <<'PY'\\nfrom pathlib import Path\\np=Path('django/contrib/admin/options.py')\\nlines=p.read_text().splitlines()\\nfor i,l in enumerate(lines):\\n    if 'def changelist_view' in l:\\n        start=i\\n        break\\n# fix docstring lines start+1.. start+2\\nlines[start+1]='        \\\"\\\"\\\"'\\nlines[start+2]='        The \\\\\\\"change list\\\\\\\" admin view for this model.'\\nlines[start+3]='        \\\"\\\"\\\"'\\np.write_text('\\\\n'.join(lines)+\\\"\\\\n\\\")\\nprint('fixed docstring')\\nPY\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_SQKFOyQ6pWqSOsgbymz2NjM3",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 162,
+            "prompt_tokens": 5704,
+            "total_tokens": 5866,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 1408
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0100324,
+        "timestamp": 1776994693.5329082
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\nfixed docstring\n</output>",
+      "extra": {
+        "raw_output": "fixed docstring\n",
+        "returncode": 0,
+        "timestamp": 1776994693.6108854,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_SQKFOyQ6pWqSOsgbymz2NjM3",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && python -m compileall -q django/contrib/admin/options.py\"}",
+            "name": "bash"
+          },
+          "id": "call_qw3dAyoigGz3x0UYJNAuh4pG",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && python -m compileall -q django/contrib/admin/options.py",
+            "tool_call_id": "call_qw3dAyoigGz3x0UYJNAuh4pG"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmfZbibsZVXGdLfVv9mYgkPyv78",
+          "created": 1776994693,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && python -m compileall -q django/contrib/admin/options.py\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_qw3dAyoigGz3x0UYJNAuh4pG",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 34,
+            "prompt_tokens": 5895,
+            "total_tokens": 5929,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 5120
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0027282499999999998,
+        "timestamp": 1776994694.682486
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n</output>",
+      "extra": {
+        "raw_output": "",
+        "returncode": 0,
+        "timestamp": 1776994694.7812219,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_qw3dAyoigGz3x0UYJNAuh4pG",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && sed -n '1912,1932p' django/contrib/admin/options.py\"}",
+            "name": "bash"
+          },
+          "id": "call_DjII60FL1JU845q2DR7SMuEm",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && sed -n '1912,1932p' django/contrib/admin/options.py",
+            "tool_call_id": "call_DjII60FL1JU845q2DR7SMuEm"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmg9faeQlHVDo7W0OBtRI3WusRl",
+          "created": 1776994694,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && sed -n '1912,1932p' django/contrib/admin/options.py\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_DjII60FL1JU845q2DR7SMuEm",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 38,
+            "prompt_tokens": 5954,
+            "total_tokens": 5992,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 5760
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0018795,
+        "timestamp": 1776994695.8227456
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n\n    @csrf_protect_m\n    def changelist_view(self, request, extra_context=None):\n        \"\"\"\n        The \"change list\" admin view for this model.\n        \"\"\"\n        # Ensure that data modifications are atomic to avoid partial updates\n        # if an exception is raised while processing a POST request.\n        if request.method == \"POST\":\n            with transaction.atomic(using=router.db_for_write(self.model)):\n                return self._changelist_view(request, extra_context)\n        return self._changelist_view(request, extra_context)\n\n    def _changelist_view(self, request, extra_context=None):\n        \"\"\"Handle the changelist view.\n\n        This exists to allow wrapping POST requests in a transaction.\n        \"\"\"\n        from django.contrib.admin.views.main import ERROR_FLAG\n\n        app_label = self.opts.app_label\n</output>",
+      "extra": {
+        "raw_output": "\n    @csrf_protect_m\n    def changelist_view(self, request, extra_context=None):\n        \"\"\"\n        The \"change list\" admin view for this model.\n        \"\"\"\n        # Ensure that data modifications are atomic to avoid partial updates\n        # if an exception is raised while processing a POST request.\n        if request.method == \"POST\":\n            with transaction.atomic(using=router.db_for_write(self.model)):\n                return self._changelist_view(request, extra_context)\n        return self._changelist_view(request, extra_context)\n\n    def _changelist_view(self, request, extra_context=None):\n        \"\"\"Handle the changelist view.\n\n        This exists to allow wrapping POST requests in a transaction.\n        \"\"\"\n        from django.contrib.admin.views.main import ERROR_FLAG\n\n        app_label = self.opts.app_label\n",
+        "returncode": 0,
+        "timestamp": 1776994695.8817644,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_DjII60FL1JU845q2DR7SMuEm",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && git diff -- django/contrib/admin/options.py > patch.txt\"}",
+            "name": "bash"
+          },
+          "id": "call_DkUzWYWvbmUMmMxOPCEuFVLb",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && git diff -- django/contrib/admin/options.py > patch.txt",
+            "tool_call_id": "call_DkUzWYWvbmUMmMxOPCEuFVLb"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmi7HH5LBo0rYH9EmRMmfnRugVn",
+          "created": 1776994696,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && git diff -- django/contrib/admin/options.py > patch.txt\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_DkUzWYWvbmUMmMxOPCEuFVLb",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 33,
+            "prompt_tokens": 6183,
+            "total_tokens": 6216,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 5888
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.00200865,
+        "timestamp": 1776994696.8921206
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n</output>",
+      "extra": {
+        "raw_output": "",
+        "returncode": 0,
+        "timestamp": 1776994696.9748423,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_DkUzWYWvbmUMmMxOPCEuFVLb",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && sed -n '1,120p' patch.txt\"}",
+            "name": "bash"
+          },
+          "id": "call_qTOVHAybhVCenRXwSSG9ZnCg",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && sed -n '1,120p' patch.txt",
+            "tool_call_id": "call_qTOVHAybhVCenRXwSSG9ZnCg"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmjtS66MohJTxrM3BrLZMzN44PB",
+          "created": 1776994697,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && sed -n '1,120p' patch.txt\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_qTOVHAybhVCenRXwSSG9ZnCg",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 32,
+            "prompt_tokens": 6241,
+            "total_tokens": 6273,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 5760
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.00229775,
+        "timestamp": 1776994698.0213878
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\ndiff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex 5f07a4208a..8d201b8e2a 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -1913,7 +1913,19 @@ class ModelAdmin(BaseModelAdmin):\n     @csrf_protect_m\n     def changelist_view(self, request, extra_context=None):\n         \"\"\"\n-        The 'change list' admin view for this model.\n+        The \"change list\" admin view for this model.\n+        \"\"\"\n+        # Ensure that data modifications are atomic to avoid partial updates\n+        # if an exception is raised while processing a POST request.\n+        if request.method == \"POST\":\n+            with transaction.atomic(using=router.db_for_write(self.model)):\n+                return self._changelist_view(request, extra_context)\n+        return self._changelist_view(request, extra_context)\n+\n+    def _changelist_view(self, request, extra_context=None):\n+        \"\"\"Handle the changelist view.\n+\n+        This exists to allow wrapping POST requests in a transaction.\n         \"\"\"\n         from django.contrib.admin.views.main import ERROR_FLAG\n \n</output>",
+      "extra": {
+        "raw_output": "diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex 5f07a4208a..8d201b8e2a 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -1913,7 +1913,19 @@ class ModelAdmin(BaseModelAdmin):\n     @csrf_protect_m\n     def changelist_view(self, request, extra_context=None):\n         \"\"\"\n-        The 'change list' admin view for this model.\n+        The \"change list\" admin view for this model.\n+        \"\"\"\n+        # Ensure that data modifications are atomic to avoid partial updates\n+        # if an exception is raised while processing a POST request.\n+        if request.method == \"POST\":\n+            with transaction.atomic(using=router.db_for_write(self.model)):\n+                return self._changelist_view(request, extra_context)\n+        return self._changelist_view(request, extra_context)\n+\n+    def _changelist_view(self, request, extra_context=None):\n+        \"\"\"Handle the changelist view.\n+\n+        This exists to allow wrapping POST requests in a transaction.\n         \"\"\"\n         from django.contrib.admin.views.main import ERROR_FLAG\n \n",
+        "returncode": 0,
+        "timestamp": 1776994698.0748525,
+        "exception_info": ""
+      },
+      "tool_call_id": "call_qTOVHAybhVCenRXwSSG9ZnCg",
+      "role": "tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"cd /testbed && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt\"}",
+            "name": "bash"
+          },
+          "id": "call_Pl18ctHXjNnyk9lkX8UfIFTv",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "refusal": null
+      },
+      "annotations": [],
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt",
+            "tool_call_id": "call_Pl18ctHXjNnyk9lkX8UfIFTv"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-DXzmk34AImfezbqLjSpQV4MSwdb0F",
+          "created": 1776994698,
+          "model": "gpt-5.2-2025-12-11",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"command\":\"cd /testbed && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt\"}",
+                      "name": "bash"
+                    },
+                    "id": "call_Pl18ctHXjNnyk9lkX8UfIFTv",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "refusal": null
+                },
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 33,
+            "prompt_tokens": 6562,
+            "total_tokens": 6595,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 6144
+            }
+          },
+          "service_tier": "default"
+        },
+        "cost": 0.0022687,
+        "timestamp": 1776994699.015307
+      }
+    },
+    {
+      "role": "exit",
+      "content": "diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex 5f07a4208a..8d201b8e2a 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -1913,7 +1913,19 @@ class ModelAdmin(BaseModelAdmin):\n     @csrf_protect_m\n     def changelist_view(self, request, extra_context=None):\n         \"\"\"\n-        The 'change list' admin view for this model.\n+        The \"change list\" admin view for this model.\n+        \"\"\"\n+        # Ensure that data modifications are atomic to avoid partial updates\n+        # if an exception is raised while processing a POST request.\n+        if request.method == \"POST\":\n+            with transaction.atomic(using=router.db_for_write(self.model)):\n+                return self._changelist_view(request, extra_context)\n+        return self._changelist_view(request, extra_context)\n+\n+    def _changelist_view(self, request, extra_context=None):\n+        \"\"\"Handle the changelist view.\n+\n+        This exists to allow wrapping POST requests in a transaction.\n         \"\"\"\n         from django.contrib.admin.views.main import ERROR_FLAG\n \n",
+      "extra": {
+        "exit_status": "Submitted",
+        "submission": "diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex 5f07a4208a..8d201b8e2a 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -1913,7 +1913,19 @@ class ModelAdmin(BaseModelAdmin):\n     @csrf_protect_m\n     def changelist_view(self, request, extra_context=None):\n         \"\"\"\n-        The 'change list' admin view for this model.\n+        The \"change list\" admin view for this model.\n+        \"\"\"\n+        # Ensure that data modifications are atomic to avoid partial updates\n+        # if an exception is raised while processing a POST request.\n+        if request.method == \"POST\":\n+            with transaction.atomic(using=router.db_for_write(self.model)):\n+                return self._changelist_view(request, extra_context)\n+        return self._changelist_view(request, extra_context)\n+\n+    def _changelist_view(self, request, extra_context=None):\n+        \"\"\"Handle the changelist view.\n+\n+        This exists to allow wrapping POST requests in a transaction.\n         \"\"\"\n         from django.contrib.admin.views.main import ERROR_FLAG\n \n"
+      }
+    }
+  ],
+  "trajectory_format": "mini-swe-agent-1.1",
+  "instance_id": "django__django-16100"
+}

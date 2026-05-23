@@ -21,6 +21,7 @@ VAL_GROUPS="${VAL_GROUPS:-}"
 if [[ -z "$VAL_GROUPS" ]]; then
   VAL_GROUPS=$(((NUM_TRAJECTORIES + VAL_GROUP_SIZE - 1) / VAL_GROUP_SIZE))
 fi
+VAL_START_GROUP_INDEX="${VAL_START_GROUP_INDEX:-0}"
 ACTUAL_TRAJECTORIES=$((VAL_GROUPS * VAL_GROUP_SIZE))
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
@@ -98,7 +99,7 @@ output_file="$(basename "$OUTPUT_JSONL")"
 declare -a cmd=(
   python -m ragen.llm_agent.agent_proxy
   --config-name eval
-  "system.CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
+  "system.CUDA_VISIBLE_DEVICES='${CUDA_VISIBLE_DEVICES}'"
   "model_path=${ROLLOUT_MODEL}"
   "actor_rollout_ref.rollout.tensor_model_parallel_size=${TP_SIZE}"
   "actor_rollout_ref.rollout.gpu_memory_utilization=${GPU_MEMORY_UTILIZATION}"
@@ -113,6 +114,7 @@ declare -a cmd=(
   "agent_proxy.max_actions_per_turn=${MAX_ACTIONS_PER_TURN}"
   "es_manager.val.env_groups=${VAL_GROUPS}"
   "es_manager.val.group_size=${VAL_GROUP_SIZE}"
+  "es_manager.val.start_group_index=${VAL_START_GROUP_INDEX}"
   "output.dir=${output_dir}"
   "output.filename=${output_file}"
   "output.format=jsonl"
@@ -150,9 +152,9 @@ case "$TASK" in
       "es_manager.val.env_configs.n_groups=[${VAL_GROUPS}]"
       "custom_envs.${ENV_TAG}.max_actions_per_traj=${MAX_ACTIONS_PER_TRAJ}"
       "custom_envs.${ENV_TAG}.max_tokens=${ENV_MAX_TOKENS}"
-      "custom_envs.${ENV_TAG}.env_config.train_path=${SEARCH_DATA_PATH}"
-      "custom_envs.${ENV_TAG}.env_config.retrieval_server_url=${RETRIEVAL_SERVER_URL}"
-      "custom_envs.${ENV_TAG}.env_config.mock_mode=$(bool_hydra "$SEARCH_MOCK_MODE")"
+      "++custom_envs.${ENV_TAG}.env_config.train_path=${SEARCH_DATA_PATH}"
+      "++custom_envs.${ENV_TAG}.env_config.retrieval_server_url=${RETRIEVAL_SERVER_URL}"
+      "++custom_envs.${ENV_TAG}.env_config.mock_mode=$(bool_hydra "$SEARCH_MOCK_MODE")"
     )
     ;;
   *)
@@ -171,6 +173,9 @@ echo "Running local-model rollout"
 echo "  task: $TASK"
 echo "  model: $ROLLOUT_MODEL"
 echo "  trajectories: $ACTUAL_TRAJECTORIES (${VAL_GROUPS} groups x ${VAL_GROUP_SIZE})"
+echo "  start_group_index: $VAL_START_GROUP_INDEX"
+echo "  CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
+echo "  tensor parallel size: $TP_SIZE"
 echo "  output: $OUTPUT_JSONL"
 quote_cmd "${cmd[@]}"
 
@@ -178,7 +183,7 @@ if [[ "$DRY_RUN" = "1" ]]; then
   exit 0
 fi
 
-"${cmd[@]}"
+CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES" "${cmd[@]}"
 
 if [[ ! -f "$OUTPUT_JSONL" ]]; then
   echo "Expected rollout JSONL was not written: $OUTPUT_JSONL" >&2

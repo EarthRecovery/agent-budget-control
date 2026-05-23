@@ -35,6 +35,16 @@ def get_special_tokens(tokenizer: AutoTokenizer):
         raise ValueError(f"Unsupported model: {tokenizer.name_or_path}")
     return special_token, reward_token
 
+def ensure_padding_token(tokenizer: AutoTokenizer):
+    if tokenizer.pad_token is not None:
+        return
+    if tokenizer.eos_token is None:
+        raise ValueError(
+            f"Tokenizer {tokenizer.name_or_path} has no pad_token or eos_token. "
+            "Set tokenizer.pad_token before batching padded inputs."
+        )
+    tokenizer.pad_token = tokenizer.eos_token
+
 def get_masks_and_scores(input_ids: torch.Tensor, tokenizer: AutoTokenizer, all_scores: List[List[float]] = None, use_turn_scores: bool = False, enable_response_mask: bool = False):
     """
     input_ids: shape (bsz, seq_len)
@@ -92,6 +102,7 @@ class ContextManager:
         """
         self.config = config
         self.tokenizer = tokenizer
+        ensure_padding_token(self.tokenizer)
         self.processor = processor
         self.mode = mode
         self.action_sep = self.config.agent_proxy.action_sep

@@ -49,7 +49,7 @@ Common overrides:
   ROLLOUT_MODEL=Qwen/Qwen3-8B
   LEARNER_MODEL=Qwen/Qwen2.5-7B-Instruct
   NUM_TRAJECTORIES=128
-  EXP_BASE=/path/to/run
+  EXP_BASE=data/budget-rl/my_run
   NGPUS=8
   TP_SIZE=4
   SFT_TOTAL_EPOCHS=5
@@ -227,10 +227,6 @@ activate_runtime() {
       # shellcheck disable=SC1090
       source "$CONDA_BASE/etc/profile.d/conda.sh"
       conda activate "${CONDA_ENV_NAME:-ragenv2}"
-    elif [[ -f "/sw/external/python/anaconda3/etc/profile.d/conda.sh" ]]; then
-      # shellcheck disable=SC1091
-      source "/sw/external/python/anaconda3/etc/profile.d/conda.sh"
-      conda activate "${CONDA_ENV_NAME:-ragenv2}"
     fi
   fi
   export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/verl${PYTHONPATH:+:$PYTHONPATH}"
@@ -379,6 +375,16 @@ main() {
   esac
 
   mkdir -p "$EXP_BASE"
+  if [[ "${BUDGET_RL_DISABLE_LOG:-0}" != "1" && "${BUDGET_RL_LOG_STARTED:-0}" != "1" ]]; then
+    BUDGET_RL_LOG_FILE="${BUDGET_RL_LOG_FILE:-$EXP_BASE/run.log}"
+    mkdir -p "$(dirname "$BUDGET_RL_LOG_FILE")"
+    if [[ "${BUDGET_RL_APPEND_LOG:-0}" != "1" ]]; then
+      : >"$BUDGET_RL_LOG_FILE"
+    fi
+    export BUDGET_RL_LOG_FILE
+    export BUDGET_RL_LOG_STARTED=1
+    exec > >(tee -a "$BUDGET_RL_LOG_FILE") 2>&1
+  fi
   activate_runtime
   echo "Budget RL pipeline"
   echo "  stages: $STAGES_TEXT"
@@ -387,6 +393,14 @@ main() {
   echo "  learner model: $LEARNER_MODEL"
   echo "  exp base: $EXP_BASE"
   echo "  rollout jsonl: $ROLLOUT_JSONL"
+  echo "  log file: ${BUDGET_RL_LOG_FILE:-disabled}"
+  echo "  ngpus: ${NGPUS:-8}"
+  echo "  tp_size: ${TP_SIZE:-4}"
+  echo "  rl_batch_size: ${RL_BATCH_SIZE:-64}"
+  echo "  rl_rollout_n: ${RL_ROLLOUT_N:-16}"
+  echo "  rl_lr: ${RL_LR:-5e-7}"
+  echo "  rl_epochs: ${RL_TOTAL_EPOCHS:-5}"
+  echo "  rl_kl: $RL_KL"
 
   if contains_stage rollout; then
     echo

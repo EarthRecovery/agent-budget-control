@@ -2,7 +2,7 @@
 # Generate ablation datasets for SFT-based budget probe estimator.
 #
 # Layout produced under $BASE:
-#   splits/{sft,rl,test}_traj_ids.txt        (40/50/10 trajectory split)
+#   splits/{sft,rl,test}_traj_ids.txt        (40/50/10 trajectory split)P
 #   rl/{train,test}.parquet                   (RL training data, rl format)
 #   eval_test/train.parquet                   (held-out test set, rl format, no split)
 #   sft_point/{train,test}.parquet            (point estimation)
@@ -27,6 +27,17 @@ TASK_NAME="${TASK_NAME:-sokoban}"
 SYSTEM_PROMPT_FILE="${SYSTEM_PROMPT_FILE:-}"
 SFT_VARIANTS="${SFT_VARIANTS:-all}"
 
+if [ "${BUDGET_RL_DISABLE_LOG:-0}" != "1" ] && [ "${BUDGET_RL_LOG_STARTED:-0}" != "1" ]; then
+  BUDGET_RL_LOG_FILE="${BUDGET_RL_LOG_FILE:-${BASE}/prepare.log}"
+  mkdir -p "$(dirname "$BUDGET_RL_LOG_FILE")"
+  if [ "${BUDGET_RL_APPEND_LOG:-0}" != "1" ]; then
+    : >"$BUDGET_RL_LOG_FILE"
+  fi
+  export BUDGET_RL_LOG_FILE
+  export BUDGET_RL_LOG_STARTED=1
+  exec > >(tee -a "$BUDGET_RL_LOG_FILE") 2>&1
+fi
+
 if [ "${SKIP_ENV_ACTIVATE:-0}" != "1" ]; then
   if [ -n "${VENV_PATH:-}" ] && [ -f "${VENV_PATH}/bin/activate" ]; then
     # shellcheck disable=SC1090
@@ -38,10 +49,6 @@ if [ "${SKIP_ENV_ACTIVATE:-0}" != "1" ]; then
     elif [ -n "${CONDA_BASE:-}" ] && [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
       # shellcheck disable=SC1090
       source "${CONDA_BASE}/etc/profile.d/conda.sh"
-      conda activate "${CONDA_ENV_NAME:-ragenv2}"
-    elif [ -f "/sw/external/python/anaconda3/etc/profile.d/conda.sh" ]; then
-      # shellcheck disable=SC1091
-      source "/sw/external/python/anaconda3/etc/profile.d/conda.sh"
       conda activate "${CONDA_ENV_NAME:-ragenv2}"
     fi
   fi

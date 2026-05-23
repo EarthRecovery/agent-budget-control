@@ -34,10 +34,6 @@ if [ "${SKIP_ENV_ACTIVATE:-0}" != "1" ]; then
       # shellcheck disable=SC1090
       source "${CONDA_BASE}/etc/profile.d/conda.sh"
       conda activate "${CONDA_ENV_NAME:-ragenv2}"
-    elif [ -f "/sw/external/python/anaconda3/etc/profile.d/conda.sh" ]; then
-      # shellcheck disable=SC1091
-      source "/sw/external/python/anaconda3/etc/profile.d/conda.sh"
-      conda activate "${CONDA_ENV_NAME:-ragenv2}"
     fi
   fi
 fi
@@ -54,10 +50,11 @@ NGPUS=${NGPUS:-8}
 NNODES=${NNODES:-1}
 MODEL=${MODEL:-"Qwen/Qwen2.5-7B-Instruct"}
 TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-64}
-LR=${LR:-1e-6}
-TOTAL_EPOCHS=${TOTAL_EPOCHS:-15}
-ROLLOUT_N=${ROLLOUT_N:-5}
-TP_SIZE=${TP_SIZE:-2}
+LR=${LR:-5e-7}
+TOTAL_EPOCHS=${TOTAL_EPOCHS:-5}
+ROLLOUT_N=${ROLLOUT_N:-16}
+TP_SIZE=${TP_SIZE:-4}
+KL_LOSS_COEF=${KL_LOSS_COEF:-0.05}
 TRAINER_LOGGER=${TRAINER_LOGGER:-'["console","wandb"]'}
 RL_MODEL_DTYPE=${RL_MODEL_DTYPE:-bfloat16}
 RL_ACTOR_PARAM_OFFLOAD=${RL_ACTOR_PARAM_OFFLOAD:-False}
@@ -66,6 +63,33 @@ RL_REF_PARAM_OFFLOAD=${RL_REF_PARAM_OFFLOAD:-True}
 PROJECT_NAME=${PROJECT_NAME:-budget_probe_grpo}
 TRAIN_FILES="${DATA_DIR}/rl/train.parquet"
 VAL_FILES="${DATA_DIR}/rl/test.parquet"
+
+if [ "${BUDGET_RL_DISABLE_LOG:-0}" != "1" ] && [ "${BUDGET_RL_LOG_STARTED:-0}" != "1" ]; then
+    BUDGET_RL_LOG_FILE="${BUDGET_RL_LOG_FILE:-${DATA_DIR}/grpo_run.log}"
+    mkdir -p "$(dirname "$BUDGET_RL_LOG_FILE")"
+    if [ "${BUDGET_RL_APPEND_LOG:-0}" != "1" ]; then
+        : >"$BUDGET_RL_LOG_FILE"
+    fi
+    export BUDGET_RL_LOG_FILE
+    export BUDGET_RL_LOG_STARTED=1
+    exec > >(tee -a "$BUDGET_RL_LOG_FILE") 2>&1
+fi
+
+echo "Budget Probe GRPO"
+echo "  log file: ${BUDGET_RL_LOG_FILE:-disabled}"
+echo "  data dir: ${DATA_DIR}"
+echo "  model: ${MODEL}"
+echo "  ngpus: ${NGPUS}"
+echo "  tp_size: ${TP_SIZE}"
+echo "  train_batch_size: ${TRAIN_BATCH_SIZE}"
+echo "  rollout_n: ${ROLLOUT_N}"
+echo "  lr: ${LR}"
+echo "  total_epochs: ${TOTAL_EPOCHS}"
+echo "  max_prompt_length: 8192"
+echo "  max_response_length: 1024"
+echo "  entropy_coeff: 0"
+echo "  use_kl_in_reward: False"
+echo "  kl_loss_coef: ${KL_LOSS_COEF}"
 
 if [ ! -f "$VAL_FILES" ]; then
     VAL_FILES="$TRAIN_FILES"
@@ -86,7 +110,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.ppo_mini_batch_size=64 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.actor.use_kl_loss=True \
-    actor_rollout_ref.actor.kl_loss_coef=0.001 \
+    actor_rollout_ref.actor.kl_loss_coef=${KL_LOSS_COEF} \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \

@@ -194,11 +194,20 @@ def _load_eval_summary(input_dir: Path) -> Dict[str, Any]:
         "source_files": [],
     }
 
-    candidate_files = sorted(
-        path
-        for path in input_dir.glob("*.json")
-        if path.is_file() and path.name != "preds.json"
-    )
+    search_dirs = [input_dir]
+    if input_dir.parent != input_dir:
+        search_dirs.append(input_dir.parent)
+    seen_files = set()
+    candidate_files = []
+    for search_dir in search_dirs:
+        for path in sorted(search_dir.glob("*.json")):
+            if not path.is_file() or path.name == "preds.json":
+                continue
+            resolved = path.resolve()
+            if resolved in seen_files:
+                continue
+            seen_files.add(resolved)
+            candidate_files.append(path)
     for candidate in candidate_files:
         with candidate.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
