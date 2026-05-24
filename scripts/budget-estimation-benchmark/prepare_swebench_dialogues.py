@@ -384,16 +384,27 @@ def main() -> None:
         traj_files = traj_files[: int(args.max_rollouts)]
 
     rollouts: List[Dict[str, Any]] = []
-    skipped = 0
+    skipped_no_turns = 0
+    skipped_invalid_json = 0
+    skipped_unreadable = 0
     for env_index, traj_path in enumerate(traj_files):
-        rollout = _convert_traj_to_rollout(
-            traj_path,
-            env_index=env_index,
-            preds=preds,
-            eval_summary=eval_summary,
-        )
+        try:
+            rollout = _convert_traj_to_rollout(
+                traj_path,
+                env_index=env_index,
+                preds=preds,
+                eval_summary=eval_summary,
+            )
+        except json.JSONDecodeError as exc:
+            print(f"Skipping invalid SWE traj JSON: {traj_path} ({exc})")
+            skipped_invalid_json += 1
+            continue
+        except OSError as exc:
+            print(f"Skipping unreadable SWE traj JSON: {traj_path} ({exc})")
+            skipped_unreadable += 1
+            continue
         if rollout is None:
-            skipped += 1
+            skipped_no_turns += 1
             continue
         rollouts.append(rollout)
 
@@ -408,8 +419,12 @@ def main() -> None:
             "Loaded SWE-bench resolution summary from "
             + ", ".join(eval_summary.get("source_files") or [])
         )
-    if skipped:
-        print(f"Skipped {skipped} rollout(s) with no assistant turns")
+    if skipped_no_turns:
+        print(f"Skipped {skipped_no_turns} rollout(s) with no assistant turns")
+    if skipped_invalid_json:
+        print(f"Skipped {skipped_invalid_json} invalid JSON rollout file(s)")
+    if skipped_unreadable:
+        print(f"Skipped {skipped_unreadable} unreadable rollout file(s)")
     print(f"Wrote {output_path}")
 
 
