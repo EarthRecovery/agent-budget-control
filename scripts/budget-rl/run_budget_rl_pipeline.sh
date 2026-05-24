@@ -268,6 +268,10 @@ run_prepare() {
     "TOKENIZER=$TOKENIZER"
     "TASK_NAME=$(task_name_for_prepare)"
     "SFT_VARIANTS=$SFT_ABLATION"
+    "BUDGET_PROBE_CONTEXT_WINDOW_MODE=${BUDGET_PROBE_CONTEXT_WINDOW_MODE:-full}"
+    "BUDGET_PROBE_MAX_CONTEXT_WINDOW=${BUDGET_PROBE_MAX_CONTEXT_WINDOW:--1}"
+    "BUDGET_PROBE_MAX_PROMPT_TOKENS=${BUDGET_PROBE_MAX_PROMPT_TOKENS:-}"
+    "BUDGET_PROBE_DROP_OVERLONG_PROMPTS=${BUDGET_PROBE_DROP_OVERLONG_PROMPTS:-0}"
     bash "$SCRIPT_DIR/prepare_all_ablations.sh"
   )
   if [[ "${DRY_RUN:-0}" = "1" ]]; then
@@ -310,12 +314,13 @@ run_sft() {
 }
 
 run_rl() {
-  local sft_ckpt rl_name rl_dir
+  local sft_ckpt rl_name rl_dir rl_model
   sft_ckpt="${SFT_CKPT:-$EXP_BASE/checkpoints/$SFT_ABLATION/huggingface_e$SFT_TOTAL_EPOCHS}"
   rl_name="${RL_EXPERIMENT_NAME:-${EXP_NAME}_rl_${SFT_ABLATION}_e${SFT_TOTAL_EPOCHS}_kl$(printf '%s' "$RL_KL" | tr -d '.')}"
   rl_dir="${RL_SAVE_DIR:-$EXP_BASE/checkpoints/$rl_name}"
+  rl_model="${RL_INIT_MODEL:-$sft_ckpt}"
 
-  if [[ ! -f "$sft_ckpt/config.json" ]]; then
+  if [[ -z "${RL_INIT_MODEL:-}" && ! -f "$sft_ckpt/config.json" ]]; then
     if [[ "${DRY_RUN:-0}" = "1" ]]; then
       echo "DRY_RUN: would require SFT checkpoint at $sft_ckpt/config.json"
     else
@@ -323,11 +328,15 @@ run_rl() {
       exit 3
     fi
   fi
+  if [[ -n "${RL_INIT_MODEL:-}" && -e "$rl_model" && ! -f "$rl_model/config.json" ]]; then
+    echo "RL_INIT_MODEL exists but has no config.json: $rl_model" >&2
+    exit 3
+  fi
 
   local -a cmd=(
     env
     "DATA_DIR=$EXP_BASE"
-    "MODEL=$sft_ckpt"
+    "MODEL=$rl_model"
     "NGPUS=${RL_NGPUS:-${NGPUS:-8}}"
     "TP_SIZE=${RL_TP_SIZE:-${TP_SIZE:-4}}"
     "TRAIN_BATCH_SIZE=${RL_BATCH_SIZE:-64}"

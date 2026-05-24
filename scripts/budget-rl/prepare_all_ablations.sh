@@ -26,6 +26,10 @@ TOKENIZER="${TOKENIZER:-Qwen/Qwen2.5-7B-Instruct}"
 TASK_NAME="${TASK_NAME:-sokoban}"
 SYSTEM_PROMPT_FILE="${SYSTEM_PROMPT_FILE:-}"
 SFT_VARIANTS="${SFT_VARIANTS:-all}"
+BUDGET_PROBE_CONTEXT_WINDOW_MODE="${BUDGET_PROBE_CONTEXT_WINDOW_MODE:-full}"
+BUDGET_PROBE_MAX_CONTEXT_WINDOW="${BUDGET_PROBE_MAX_CONTEXT_WINDOW:--1}"
+BUDGET_PROBE_MAX_PROMPT_TOKENS="${BUDGET_PROBE_MAX_PROMPT_TOKENS:-}"
+BUDGET_PROBE_DROP_OVERLONG_PROMPTS="${BUDGET_PROBE_DROP_OVERLONG_PROMPTS:-0}"
 
 if [ "${BUDGET_RL_DISABLE_LOG:-0}" != "1" ] && [ "${BUDGET_RL_LOG_STARTED:-0}" != "1" ]; then
   BUDGET_RL_LOG_FILE="${BUDGET_RL_LOG_FILE:-${BASE}/prepare.log}"
@@ -98,11 +102,24 @@ COMMON_FLAGS=(
   --task-name "${TASK_NAME}"
   --seed "${SEED}"
   --min-remaining-tokens 1
+  --context-window-mode "${BUDGET_PROBE_CONTEXT_WINDOW_MODE}"
+  --max-context-window "${BUDGET_PROBE_MAX_CONTEXT_WINDOW}"
 )
 
 if [ -n "${SYSTEM_PROMPT_FILE}" ]; then
   COMMON_FLAGS+=(--system-prompt-file "${SYSTEM_PROMPT_FILE}")
 fi
+if [ -n "${BUDGET_PROBE_MAX_PROMPT_TOKENS}" ]; then
+  COMMON_FLAGS+=(--max-prompt-tokens "${BUDGET_PROBE_MAX_PROMPT_TOKENS}")
+fi
+if [ "${BUDGET_PROBE_DROP_OVERLONG_PROMPTS}" = "1" ]; then
+  COMMON_FLAGS+=(--drop-overlong-prompts)
+fi
+
+echo "Context window mode: ${BUDGET_PROBE_CONTEXT_WINDOW_MODE}"
+echo "Max context window: ${BUDGET_PROBE_MAX_CONTEXT_WINDOW}"
+echo "Max prompt tokens: ${BUDGET_PROBE_MAX_PROMPT_TOKENS:-disabled}"
+echo "Drop overlong prompts: ${BUDGET_PROBE_DROP_OVERLONG_PROMPTS}"
 
 echo
 echo "=== Step 2: RL training data (interval, percent ±10%, balanced) ==="

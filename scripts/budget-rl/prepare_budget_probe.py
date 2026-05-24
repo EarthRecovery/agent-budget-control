@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+from typing import Optional
 
 import datasets
 from transformers import AutoTokenizer
@@ -219,6 +220,64 @@ def count_tokens(tokenizer, text):
     return len(tokenizer.encode(text, add_special_tokens=False))
 
 
+def count_message_tokens(tokenizer, messages, add_generation_prompt=False):
+    text = tokenizer.apply_chat_template(
+        messages,
+        add_generation_prompt=add_generation_prompt,
+        tokenize=False,
+    )
+    return count_tokens(tokenizer, text)
+
+
+def resolve_max_context_window(context_window_mode: str,
+                               max_context_window: int) -> Optional[int]:
+    if context_window_mode == "full":
+        return None
+    if max_context_window is None or max_context_window < 0:
+        return None
+    return int(max_context_window)
+
+
+def select_visible_turn_start(probe_after: int, context_window_mode: str,
+                              max_context_window: int) -> int:
+    resolved = resolve_max_context_window(context_window_mode, max_context_window)
+    if probe_after <= 0 or resolved is None:
+        return 0
+    return max(0, probe_after - resolved)
+
+
+def drop_oldest_complete_turn(messages):
+    """Drop the oldest user/assistant pair before the final probe user turn."""
+    start = 1 if messages and messages[0].get("role") == "system" else 0
+    end = len(messages) - 1
+    for idx in range(start, max(start, end - 1)):
+        if (messages[idx].get("role") == "user" and
+                messages[idx + 1].get("role") == "assistant"):
+            del messages[idx:idx + 2]
+            return True
+    return False
+
+
+def apply_prompt_token_window(tokenizer, messages, max_prompt_tokens):
+    if max_prompt_tokens is None or max_prompt_tokens <= 0:
+        return messages, 0, None, False
+
+    windowed = [dict(msg) for msg in messages]
+    removed_turns = 0
+    prompt_tokens = count_message_tokens(
+        tokenizer, windowed, add_generation_prompt=True
+    )
+    while prompt_tokens > max_prompt_tokens:
+        if not drop_oldest_complete_turn(windowed):
+            break
+        removed_turns += 1
+        prompt_tokens = count_message_tokens(
+            tokenizer, windowed, add_generation_prompt=True
+        )
+
+    return windowed, removed_turns, prompt_tokens, prompt_tokens > max_prompt_tokens
+
+
 def parse_turns(messages):
     turns = []
     i = 0
@@ -241,7 +300,11 @@ def parse_turns(messages):
 def process_trajectory(traj, tokenizer, max_tokens, probe_every_n, margin,
                        target_mode="interval", interval_type="percent",
                        interval_width=None, reasoning=True,
-                       system_prompt=SYSTEM_PROMPT):
+                       system_prompt=SYSTEM_PROMPT,
+                       context_window_mode="full",
+                       max_context_window=-1,
+                       max_prompt_tokens=None,
+                       drop_overlong_prompts=False):
     """Generate budget probe samples for a trajectory.
 
     Backward compatible: if interval_width is None and target_mode/interval_type
@@ -258,12 +321,16 @@ def process_trajectory(traj, tokenizer, max_tokens, probe_every_n, margin,
         interval_width = margin
     return _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
                                      target_mode, interval_type, interval_width,
-                                     reasoning, system_prompt)
+                                     reasoning, system_prompt,
+                                     context_window_mode, max_context_window,
+                                     max_prompt_tokens, drop_overlong_prompts)
 
 
 def _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
                               target_mode, interval_type, interval_width, reasoning,
-                              system_prompt):
+                              system_prompt, context_window_mode,
+                              max_context_window, max_prompt_tokens,
+                              drop_overlong_prompts):
     messages = traj["messages"]
     metadata = traj.get("metadata", {})
     task_success = infer_task_success(metadata)
@@ -371,14 +438,19 @@ def _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
                 reasoning, probe_after, tokens_used, avg_per_turn,
             )
 
-        # Build message history (system + conversation turns).
+        # Build message history (system + conversation turns). In sliding-window
+        # mode, keep only the most recent completed turns in the visible context.
         # probe_after=0 keeps only the system prompt and the first user message
         # (the initial state) so the model has something concrete to reason about.
         history = [{"role": "system", "content": system_prompt}]
         if probe_after == 0:
+            visible_start = 0
             history.append(turns[0]["user_msg"])
         else:
-            for k in range(probe_after):
+            visible_start = select_visible_turn_start(
+                probe_after, context_window_mode, max_context_window
+            )
+            for k in range(visible_start, probe_after):
                 history.append(turns[k]["user_msg"])
                 history.append(turns[k]["asst_msg"])
 
@@ -394,6 +466,16 @@ def _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
             }
         else:
             probe_history.append({"role": "user", "content": probe_content})
+
+        (
+            probe_history,
+            token_removed_turns,
+            prompt_tokens,
+            overlong_after_window,
+        ) = apply_prompt_token_window(tokenizer, probe_history, max_prompt_tokens)
+        effective_visible_start = visible_start + token_removed_turns
+        if overlong_after_window and drop_overlong_prompts:
+            continue
 
         # SFT format: full messages including ground-truth assistant response
         sft_messages = probe_history + [
@@ -431,6 +513,18 @@ def _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
                 "interval_type": interval_type,
                 "interval_width": interval_width,
                 "reasoning": reasoning,
+                "context_window_mode": context_window_mode,
+                "max_context_window": max_context_window,
+                "visible_context_start_turn": (
+                    effective_visible_start + 1 if probe_after > 0 else 0
+                ),
+                "visible_context_end_turn": probe_after,
+                "visible_context_turns": max(0, probe_after - effective_visible_start),
+                "sliding_window_truncated": effective_visible_start > 0,
+                "context_token_truncated": token_removed_turns > 0,
+                "context_prompt_tokens": prompt_tokens,
+                "context_prompt_token_limit": max_prompt_tokens,
+                "context_overlong_after_window": overlong_after_window,
             },
         })
 
@@ -511,6 +605,21 @@ def main():
                         help="Drop samples whose actual remaining tokens are below "
                              "this threshold (avoids trivial [0,0] predictions). "
                              "Default 0 keeps everything.")
+    parser.add_argument("--context-window-mode",
+                        choices=["full", "limited_multi_turn", "single_turn"],
+                        default="full",
+                        help="Visible rollout context mode. 'full' keeps all "
+                             "completed turns; limited modes keep a sliding "
+                             "window of recent completed turns.")
+    parser.add_argument("--max-context-window", type=int, default=-1,
+                        help="Number of completed turns kept when "
+                             "--context-window-mode is not full. -1 keeps all.")
+    parser.add_argument("--max-prompt-tokens", type=int, default=None,
+                        help="Optional hard prompt token limit. Oldest visible "
+                             "turns are dropped until the prompt fits.")
+    parser.add_argument("--drop-overlong-prompts", action="store_true",
+                        help="Drop samples that still exceed --max-prompt-tokens "
+                             "after all removable turns are removed.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -538,6 +647,9 @@ def main():
     sft_records = []
     rl_records = []
     impossible_count = 0
+    sliding_window_count = 0
+    token_window_count = 0
+    overlong_after_window_count = 0
     total_trajs = 0
     skipped_by_filter = 0
 
@@ -556,8 +668,19 @@ def main():
                 interval_width=interval_width,
                 reasoning=args.reasoning,
                 system_prompt=system_prompt,
+                context_window_mode=args.context_window_mode,
+                max_context_window=args.max_context_window,
+                max_prompt_tokens=args.max_prompt_tokens,
+                drop_overlong_prompts=args.drop_overlong_prompts,
             )
             for probe in probes:
+                meta = probe["metadata"]
+                if meta.get("sliding_window_truncated"):
+                    sliding_window_count += 1
+                if meta.get("context_token_truncated"):
+                    token_window_count += 1
+                if meta.get("context_overlong_after_window"):
+                    overlong_after_window_count += 1
                 # SFT record: messages list (VeRL MultiTurnSFTDataset format)
                 sft_records.append({
                     "messages": probe["sft_messages"],
@@ -591,6 +714,10 @@ def main():
     print(f"Generated {total_probes} budget probe samples")
     print(f"  Possible: {total_probes - impossible_count}")
     print(f"  Impossible: {impossible_count}")
+    print(f"  Sliding-window truncated: {sliding_window_count}")
+    print(f"  Token-window truncated: {token_window_count}")
+    if args.max_prompt_tokens is not None:
+        print(f"  Still over prompt limit after window: {overlong_after_window_count}")
 
     if args.min_remaining_tokens > 0:
         before = len(rl_records)
