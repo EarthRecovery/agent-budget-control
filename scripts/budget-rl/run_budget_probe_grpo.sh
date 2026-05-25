@@ -55,6 +55,8 @@ TOTAL_EPOCHS=${TOTAL_EPOCHS:-5}
 ROLLOUT_N=${ROLLOUT_N:-16}
 TP_SIZE=${TP_SIZE:-4}
 KL_LOSS_COEF=${KL_LOSS_COEF:-0.05}
+MAX_PROMPT_LENGTH=${MAX_PROMPT_LENGTH:-${RL_MAX_PROMPT_LENGTH:-8192}}
+MAX_RESPONSE_LENGTH=${MAX_RESPONSE_LENGTH:-${RL_MAX_RESPONSE_LENGTH:-1024}}
 TRAINER_LOGGER=${TRAINER_LOGGER:-'["console","wandb"]'}
 RL_MODEL_DTYPE=${RL_MODEL_DTYPE:-bfloat16}
 RL_ACTOR_PARAM_OFFLOAD=${RL_ACTOR_PARAM_OFFLOAD:-False}
@@ -85,8 +87,8 @@ echo "  train_batch_size: ${TRAIN_BATCH_SIZE}"
 echo "  rollout_n: ${ROLLOUT_N}"
 echo "  lr: ${LR}"
 echo "  total_epochs: ${TOTAL_EPOCHS}"
-echo "  max_prompt_length: 8192"
-echo "  max_response_length: 1024"
+echo "  max_prompt_length: ${MAX_PROMPT_LENGTH}"
+echo "  max_response_length: ${MAX_RESPONSE_LENGTH}"
 echo "  entropy_coeff: 0"
 echo "  use_kl_in_reward: False"
 echo "  kl_loss_coef: ${KL_LOSS_COEF}"
@@ -100,8 +102,8 @@ python3 -m verl.trainer.main_ppo \
     data.train_files="${TRAIN_FILES}" \
     data.val_files="${VAL_FILES}" \
     data.train_batch_size=${TRAIN_BATCH_SIZE} \
-    data.max_prompt_length=8192 \
-    data.max_response_length=1024 \
+    data.max_prompt_length=${MAX_PROMPT_LENGTH} \
+    data.max_response_length=${MAX_RESPONSE_LENGTH} \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     actor_rollout_ref.model.path=${MODEL} \

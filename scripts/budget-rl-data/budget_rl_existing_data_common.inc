@@ -682,10 +682,14 @@ budget_rl_data_main() {
   echo "  rl_lr: ${RL_LR:-5e-7}"
   echo "  rl_epochs: $RL_TOTAL_EPOCHS"
   echo "  rl_kl: $RL_KL"
-  echo "  rl_max_prompt_length: ${MAX_TOKENS:-8192}"
+  echo "  rl_max_prompt_length: ${RL_MAX_PROMPT_LENGTH:-8192}"
+  echo "  rl_max_model_len: ${RL_MAX_MODEL_LEN:-${RL_MAX_PROMPT_LENGTH:-8192}}"
   echo "  rl_max_response_length: ${RL_MAX_RESPONSE_LENGTH:-1024}"
   echo "  eval_max_tokens: ${EVAL_MAX_TOKENS:-512}"
   echo "  eval_temperature: ${EVAL_TEMPERATURE:-0.0}"
+  echo "  target_unit: ${TARGET_UNIT:-tokens}"
+  echo "  max_cost: ${MAX_COST:-disabled}"
+  echo "  cost_key: ${COST_KEY:-env_reward_cost}"
   echo "  budget_probe_context_window_mode: ${BUDGET_PROBE_CONTEXT_WINDOW_MODE:-full}"
   echo "  budget_probe_max_context_window: ${BUDGET_PROBE_MAX_CONTEXT_WINDOW:--1}"
   echo "  budget_probe_max_prompt_tokens: ${BUDGET_PROBE_MAX_PROMPT_TOKENS:-disabled}"
@@ -713,6 +717,15 @@ budget_rl_data_main() {
       SFT_CKPT="$SFT_CKPT" \
       RL_EXPERIMENT_NAME="$RL_EXPERIMENT_NAME" \
       RL_SAVE_DIR="$RL_SAVE_DIR" \
+      RL_MAX_PROMPT_LENGTH="${RL_MAX_PROMPT_LENGTH:-8192}" \
+      RL_MAX_MODEL_LEN="${RL_MAX_MODEL_LEN:-${RL_MAX_PROMPT_LENGTH:-8192}}" \
+      RL_MAX_RESPONSE_LENGTH="${RL_MAX_RESPONSE_LENGTH:-1024}" \
+      TARGET_UNIT="${TARGET_UNIT:-tokens}" \
+      MAX_COST="${MAX_COST:-}" \
+      COST_KEY="${COST_KEY:-env_reward_cost}" \
+      COST_DECIMALS="${COST_DECIMALS:-2}" \
+      MIN_REMAINING_TOKENS="${MIN_REMAINING_TOKENS:-1}" \
+      MIN_REMAINING_VALUE="${MIN_REMAINING_VALUE:-}" \
       BUDGET_PROBE_CONTEXT_WINDOW_MODE="${BUDGET_PROBE_CONTEXT_WINDOW_MODE:-full}" \
       BUDGET_PROBE_MAX_CONTEXT_WINDOW="${BUDGET_PROBE_MAX_CONTEXT_WINDOW:--1}" \
       BUDGET_PROBE_MAX_PROMPT_TOKENS="${BUDGET_PROBE_MAX_PROMPT_TOKENS:-}" \

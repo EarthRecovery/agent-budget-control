@@ -80,46 +80,50 @@ def infer_task_success(metadata: dict) -> bool:
                 return bool(value)
     return False
 
-def _build_probe_template(target_mode: str, reasoning: bool) -> str:
+def _build_probe_template(target_mode: str, reasoning: bool,
+                          target_unit: str = "tokens") -> str:
     """Build the per-turn probe prompt template based on ablation mode."""
+    unit_name = "cost" if target_unit == "cost" else "tokens"
+    consumption_name = "cost consumption" if target_unit == "cost" else "token consumption"
+    remaining_name = "cost" if target_unit == "cost" else "tokens (input + output)"
     intro = (
         "Based on the provided rollout context, you are provided below information:\n"
         "1. You have completed {completed_turns} turns.\n"
-        "2. Each turn, your token consumption is {turn_token_usage_text}.\n"
-        "3. You need to finish the task within {max_context_window_tokens} tokens.\n"
+        f"2. Each turn, your {consumption_name} is {{turn_token_usage_text}}.\n"
+        f"3. You need to finish the task within {{max_budget}} {unit_name}.\n"
         "\n"
         "Now, estimate:\n"
         "1. Whether you can finish the task successfully within "
-        "{max_context_window_tokens} total tokens (input + output).\n"
+        f"{{max_budget}} total {unit_name}.\n"
     )
     if target_mode == "interval":
         body = (
-            "2. If yes, how many additional tokens (input + output) are still needed "
+            f"2. If yes, how much additional {remaining_name} is still needed "
             "to finish the task, starting from the next turn. Return an estimation "
-            "interval: at least est_low tokens and at most est_high tokens.\n"
+            f"interval: at least est_low {unit_name} and at most est_high {unit_name}.\n"
             "3. If no, answer \"impossible\".\n"
             "4. You should try your best to estimate whether the task can finish "
             "within budget (most important). If you think the task can finish within "
             "budget, your interval should be as tight as possible while still covering "
-            "the true remaining token budget.\n"
+            f"the true remaining {unit_name} budget.\n"
             "\n"
             "Example:\n"
             "For a three-turn interaction, suppose only Turn 1 has been completed.\n"
             "The full interaction is:\n"
-            "Turn 1: input X1 tokens, output Y1 tokens;\n"
-            "Turn 2: input X2 tokens, output Y2 tokens;\n"
-            "Turn 3: input X3 tokens, output Y3 tokens.\n"
+            f"Turn 1: {unit_name} X1;\n"
+            f"Turn 2: {unit_name} X2;\n"
+            f"Turn 3: {unit_name} X3.\n"
             "You will receive:\n"
-            "turn_token_usage_text: Turn 1: input X1 tokens, output Y1 tokens\n"
+            f"turn_usage_text: Turn 1: {unit_name} X1\n"
             "You should estimate:\n"
-            "X2 + Y2 + X3 + Y3\n"
+            "X2 + X3\n"
             "\n"
         )
         ans_ok = "<answer>[est_low, est_high]</answer>"
     else:  # point
         body = (
-            "2. If yes, how many additional tokens (input + output) are still needed "
-            "to finish the task, starting from the next turn. Return a single integer "
+            f"2. If yes, how much additional {remaining_name} is still needed "
+            "to finish the task, starting from the next turn. Return a single number "
             "estimate.\n"
             "3. If no, answer \"impossible\".\n"
             "4. You should try your best to estimate whether the task can finish "
@@ -128,13 +132,13 @@ def _build_probe_template(target_mode: str, reasoning: bool) -> str:
             "Example:\n"
             "For a three-turn interaction, suppose only Turn 1 has been completed.\n"
             "The full interaction is:\n"
-            "Turn 1: input X1 tokens, output Y1 tokens;\n"
-            "Turn 2: input X2 tokens, output Y2 tokens;\n"
-            "Turn 3: input X3 tokens, output Y3 tokens.\n"
+            f"Turn 1: {unit_name} X1;\n"
+            f"Turn 2: {unit_name} X2;\n"
+            f"Turn 3: {unit_name} X3.\n"
             "You will receive:\n"
-            "turn_token_usage_text: Turn 1: input X1 tokens, output Y1 tokens\n"
+            f"turn_usage_text: Turn 1: {unit_name} X1\n"
             "You should estimate:\n"
-            "X2 + Y2 + X3 + Y3\n"
+            "X2 + X3\n"
             "\n"
         )
         ans_ok = "<answer>NUMBER</answer>"
@@ -156,51 +160,65 @@ def _build_probe_template(target_mode: str, reasoning: bool) -> str:
     return intro + body + spec
 
 
-def _make_target(remaining_tokens: int, target_mode: str, interval_type: str,
+def _format_budget_value(value: float, decimals: int) -> str:
+    if decimals <= 0:
+        return str(int(value))
+    text = f"{float(value):.{decimals}f}"
+    return text.rstrip("0").rstrip(".")
+
+
+def _make_target(remaining_value: float, target_mode: str, interval_type: str,
                  interval_width: float, reasoning: bool, probe_after: int,
-                 tokens_used: int, avg_per_turn: int) -> tuple:
+                 budget_used: float, avg_per_turn: float,
+                 target_unit: str = "tokens", value_decimals: int = 0) -> tuple:
     """Returns (ground_truth, full_answer) for the non-impossible case."""
-    if remaining_tokens == 0:
+    unit_name = "cost" if target_unit == "cost" else "tokens"
+    min_positive = 0.0 if target_unit == "cost" else 1.0
+    if remaining_value == 0:
         gt = "0" if target_mode == "point" else "[0, 0]"
         body = gt
         if reasoning:
-            return gt, (
-                f"<think>All {probe_after} turns completed using {tokens_used} tokens. "
-                f"The task is finished.</think><answer>{body}</answer>"
-            )
+            used = _format_budget_value(budget_used, value_decimals)
+            return gt, (f"<think>All {probe_after} turns completed using {used} "
+                        f"{unit_name}. The task is finished.</think><answer>{body}</answer>")
         return gt, f"<answer>{body}</answer>"
 
     if target_mode == "point":
-        gt = str(remaining_tokens)
+        gt = _format_budget_value(remaining_value, value_decimals)
         body = gt
     else:  # interval
         if interval_type == "percent":
-            est_low = max(1, int(remaining_tokens * (1 - interval_width)))
-            est_high = int(remaining_tokens * (1 + interval_width))
+            est_low = max(min_positive, remaining_value * (1 - interval_width))
+            est_high = remaining_value * (1 + interval_width)
         else:  # fixed
-            est_low = max(1, int(remaining_tokens - interval_width))
-            est_high = int(remaining_tokens + interval_width)
-        gt = f"[{est_low}, {est_high}]"
+            est_low = max(min_positive, remaining_value - interval_width)
+            est_high = remaining_value + interval_width
+        gt = f"[{_format_budget_value(est_low, value_decimals)}, {_format_budget_value(est_high, value_decimals)}]"
         body = gt
 
     if reasoning:
         if probe_after == 0:
+            remaining = _format_budget_value(remaining_value, value_decimals)
             return gt, (
                 f"<think>Given the initial task state and typical trajectories, "
-                f"I expect the full solution will need about {remaining_tokens} "
-                f"tokens.</think><answer>{body}</answer>"
+                f"I expect the full solution will need about {remaining} "
+                f"{unit_name}.</think><answer>{body}</answer>"
             )
+        used = _format_budget_value(budget_used, value_decimals)
+        avg = _format_budget_value(avg_per_turn, value_decimals)
         return gt, (
-            f"<think>I've completed {probe_after} turns using {tokens_used} tokens, "
-            f"averaging about {avg_per_turn} tokens per turn. The task should be "
+            f"<think>I've completed {probe_after} turns using {used} {unit_name}, "
+            f"averaging about {avg} {unit_name} per turn. The task should be "
             f"completable within the budget.</think><answer>{body}</answer>"
         )
     return gt, f"<answer>{body}</answer>"
 
 
-def _make_impossible_target(reasoning: bool, probe_after: int, tokens_used: int,
-                            avg_per_turn: int, max_tokens: int) -> tuple:
+def _make_impossible_target(reasoning: bool, probe_after: int, budget_used: float,
+                            avg_per_turn: float, max_budget: float,
+                            target_unit: str = "tokens", value_decimals: int = 0) -> tuple:
     """Returns (ground_truth, full_answer) for the impossible case."""
+    unit_name = "cost" if target_unit == "cost" else "tokens"
     gt = "impossible"
     if not reasoning:
         return gt, "<answer>impossible</answer>"
@@ -210,8 +228,10 @@ def _make_impossible_target(reasoning: bool, probe_after: int, tokens_used: int,
             "prior rollouts have not converged.</think><answer>impossible</answer>"
         )
     return gt, (
-        f"<think>I've completed {probe_after} turns using {tokens_used} tokens "
-        f"({avg_per_turn} per turn). At this rate the {max_tokens} budget will be "
+        f"<think>I've completed {probe_after} turns using "
+        f"{_format_budget_value(budget_used, value_decimals)} {unit_name} "
+        f"({_format_budget_value(avg_per_turn, value_decimals)} per turn). "
+        f"At this rate the {_format_budget_value(max_budget, value_decimals)} {unit_name} budget will be "
         f"exceeded.</think><answer>impossible</answer>"
     )
 
@@ -227,6 +247,21 @@ def count_message_tokens(tokenizer, messages, add_generation_prompt=False):
         tokenize=False,
     )
     return count_tokens(tokenizer, text)
+
+
+def _as_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _cost_for_turn(cost_entry, cost_key: str) -> float:
+    if not isinstance(cost_entry, dict):
+        return 0.0
+    if cost_key in cost_entry:
+        return _as_float(cost_entry.get(cost_key))
+    return _as_float(cost_entry.get("env_reward_cost"))
 
 
 def resolve_max_context_window(context_window_mode: str,
@@ -304,7 +339,11 @@ def process_trajectory(traj, tokenizer, max_tokens, probe_every_n, margin,
                        context_window_mode="full",
                        max_context_window=-1,
                        max_prompt_tokens=None,
-                       drop_overlong_prompts=False):
+                       drop_overlong_prompts=False,
+                       target_unit="tokens",
+                       max_cost=None,
+                       cost_key="env_reward_cost",
+                       cost_decimals=2):
     """Generate budget probe samples for a trajectory.
 
     Backward compatible: if interval_width is None and target_mode/interval_type
@@ -323,14 +362,17 @@ def process_trajectory(traj, tokenizer, max_tokens, probe_every_n, margin,
                                      target_mode, interval_type, interval_width,
                                      reasoning, system_prompt,
                                      context_window_mode, max_context_window,
-                                     max_prompt_tokens, drop_overlong_prompts)
+                                     max_prompt_tokens, drop_overlong_prompts,
+                                     target_unit, max_cost, cost_key,
+                                     cost_decimals)
 
 
 def _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
                               target_mode, interval_type, interval_width, reasoning,
                               system_prompt, context_window_mode,
                               max_context_window, max_prompt_tokens,
-                              drop_overlong_prompts):
+                              drop_overlong_prompts, target_unit, max_cost,
+                              cost_key, cost_decimals):
     messages = traj["messages"]
     metadata = traj.get("metadata", {})
     task_success = infer_task_success(metadata)
@@ -367,9 +409,22 @@ def _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
             out = count_tokens(tokenizer, t["asst_msg"]["content"])
         turn_tokens.append((inp, out))
 
+    cost_entries = traj.get("per_turn_costs") or []
+    turn_costs = [
+        _cost_for_turn(cost_entries[i] if i < len(cost_entries) else None, cost_key)
+        for i in range(total_turns)
+    ]
+
     trailing_tokens = 0
     if trailing_user is not None:
         trailing_tokens = count_tokens(tokenizer, trailing_user["content"])
+
+    target_unit = target_unit or "tokens"
+    if target_unit not in ("tokens", "cost"):
+        raise ValueError(f"Unsupported target_unit={target_unit!r}")
+    max_budget = float(max_cost if max_cost is not None else max_tokens) \
+        if target_unit == "cost" else float(max_tokens)
+    value_decimals = int(cost_decimals) if target_unit == "cost" else 0
 
     results = []
 
@@ -404,38 +459,57 @@ def _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
             if probe_after == total_turns:
                 remaining_tokens += trailing_tokens
 
-        total_needed = tokens_used + remaining_tokens
-        budget_ok = total_needed <= max_tokens
+        cost_used = sum(turn_costs[:probe_after])
+        remaining_cost = sum(turn_costs[probe_after:])
+
+        if target_unit == "cost":
+            budget_used = cost_used
+            remaining_value = remaining_cost
+            total_needed = cost_used + remaining_cost
+            budget_ok = total_needed <= max_budget
+        else:
+            budget_used = tokens_used
+            remaining_value = remaining_tokens
+            total_needed = tokens_used + remaining_tokens
+            budget_ok = total_needed <= max_budget
 
         if probe_after == 0:
-            turn_token_usage_text = "(no turns completed yet)"
+            turn_usage_text = "(no turns completed yet)"
         else:
             usage_parts = []
             for k in range(probe_after):
-                inp, out = turn_tokens[k]
-                usage_parts.append(
-                    f"Turn {k + 1}: input {inp} tokens, "
-                    f"output {out} tokens, total {inp + out} tokens"
-                )
-            turn_token_usage_text = "; ".join(usage_parts)
+                if target_unit == "cost":
+                    usage_parts.append(
+                        f"Turn {k + 1}: cost "
+                        f"{_format_budget_value(turn_costs[k], value_decimals)}"
+                    )
+                else:
+                    inp, out = turn_tokens[k]
+                    usage_parts.append(
+                        f"Turn {k + 1}: input {inp} tokens, "
+                        f"output {out} tokens, total {inp + out} tokens"
+                    )
+            turn_usage_text = "; ".join(usage_parts)
 
-        probe_content = _build_probe_template(target_mode, reasoning).format(
+        probe_content = _build_probe_template(target_mode, reasoning, target_unit).format(
             completed_turns=probe_after,
-            turn_token_usage_text=turn_token_usage_text,
-            max_context_window_tokens=max_tokens,
+            turn_token_usage_text=turn_usage_text,
+            max_budget=_format_budget_value(max_budget, value_decimals),
         )
 
         is_possible = task_success and budget_ok
-        avg_per_turn = (tokens_used // probe_after) if probe_after > 0 else tokens_used
+        avg_per_turn = (budget_used / probe_after) if probe_after > 0 else budget_used
 
         if (not task_success) or (not budget_ok):
             ground_truth, answer = _make_impossible_target(
-                reasoning, probe_after, tokens_used, avg_per_turn, max_tokens
+                reasoning, probe_after, budget_used, avg_per_turn, max_budget,
+                target_unit, value_decimals
             )
         else:
             ground_truth, answer = _make_target(
-                remaining_tokens, target_mode, interval_type, interval_width,
-                reasoning, probe_after, tokens_used, avg_per_turn,
+                remaining_value, target_mode, interval_type, interval_width,
+                reasoning, probe_after, budget_used, avg_per_turn,
+                target_unit, value_decimals
             )
 
         # Build message history (system + conversation turns). In sliding-window
@@ -492,6 +566,10 @@ def _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
              "output_tokens": turn_tokens[k][1]}
             for k in range(probe_after)
         ]
+        per_turn_costs = [
+            {"turn": k + 1, "cost": turn_costs[k]}
+            for k in range(probe_after)
+        ]
 
         results.append({
             "custom_id": f"{traj['custom_id']}_probe_after_turn_{probe_after}",
@@ -499,14 +577,29 @@ def _process_trajectory_impl(traj, tokenizer, max_tokens, probe_every_n,
             "rl_prompt": rl_prompt,
             "ground_truth": ground_truth,
             "remaining_tokens": remaining_tokens,
+            "remaining_cost": remaining_cost,
+            "target_value": remaining_value,
+            "target_unit": target_unit,
+            "budget_used": budget_used,
+            "total_budget_needed": total_needed,
+            "max_budget": max_budget,
             "is_possible": is_possible,
             "per_turn_tokens": per_turn_tokens,
+            "per_turn_costs": per_turn_costs,
             "metadata": {
                 **metadata,
                 "probe_after_turn": probe_after,
                 "total_turns": total_turns,
                 "tokens_used": tokens_used,
                 "remaining_tokens": remaining_tokens,
+                "cost_used": cost_used,
+                "remaining_cost": remaining_cost,
+                "target_value": remaining_value,
+                "target_unit": target_unit,
+                "budget_used": budget_used,
+                "total_budget_needed": total_needed,
+                "max_budget": max_budget,
+                "cost_key": cost_key,
                 "is_possible": is_possible,
                 "margin": interval_width,
                 "target_mode": target_mode,
@@ -605,6 +698,22 @@ def main():
                         help="Drop samples whose actual remaining tokens are below "
                              "this threshold (avoids trivial [0,0] predictions). "
                              "Default 0 keeps everything.")
+    parser.add_argument("--min-remaining-value", type=float, default=None,
+                        help="Drop samples whose target remaining value is below "
+                             "this threshold. Uses remaining tokens in token mode "
+                             "and remaining cost in cost mode.")
+    parser.add_argument("--target-unit", choices=["tokens", "cost"],
+                        default="tokens",
+                        help="Unit to predict and reward: tokens or cost "
+                             "(default: tokens).")
+    parser.add_argument("--max-cost", type=float, default=None,
+                        help="Max total cost budget when --target-unit=cost. "
+                             "Defaults to --max-tokens if omitted.")
+    parser.add_argument("--cost-key", type=str, default="env_reward_cost",
+                        help="Per-turn cost field to use from converted rollout "
+                             "records (default: env_reward_cost).")
+    parser.add_argument("--cost-decimals", type=int, default=2,
+                        help="Decimal places used when writing cost targets.")
     parser.add_argument("--context-window-mode",
                         choices=["full", "limited_multi_turn", "single_turn"],
                         default="full",
@@ -672,6 +781,10 @@ def main():
                 max_context_window=args.max_context_window,
                 max_prompt_tokens=args.max_prompt_tokens,
                 drop_overlong_prompts=args.drop_overlong_prompts,
+                target_unit=args.target_unit,
+                max_cost=args.max_cost,
+                cost_key=args.cost_key,
+                cost_decimals=args.cost_decimals,
             )
             for probe in probes:
                 meta = probe["metadata"]
@@ -700,8 +813,16 @@ def main():
                     "extra_info": {
                         "custom_id": probe["custom_id"],
                         "remaining_tokens": probe["remaining_tokens"],
+                        "remaining_cost": probe["remaining_cost"],
+                        "target_value": probe["target_value"],
+                        "target_unit": probe["target_unit"],
+                        "budget_used": probe["budget_used"],
+                        "total_budget_needed": probe["total_budget_needed"],
+                        "max_budget": probe["max_budget"],
+                        "cost_key": args.cost_key,
                         "is_possible": probe["is_possible"],
                         "per_turn_tokens": probe["per_turn_tokens"],
+                        "per_turn_costs": probe["per_turn_costs"],
                         "margin": args.margin,
                     },
                 })
@@ -712,6 +833,10 @@ def main():
     total_probes = len(sft_records)
     print(f"Processed {total_trajs} trajectories")
     print(f"Generated {total_probes} budget probe samples")
+    print(f"  Target unit: {args.target_unit}")
+    if args.target_unit == "cost":
+        print(f"  Cost key: {args.cost_key}")
+        print(f"  Max cost: {args.max_cost if args.max_cost is not None else args.max_tokens}")
     print(f"  Possible: {total_probes - impossible_count}")
     print(f"  Impossible: {impossible_count}")
     print(f"  Sliding-window truncated: {sliding_window_count}")
@@ -726,6 +851,15 @@ def main():
         sft_records = [sft_records[i] for i in keep]
         rl_records = [rl_records[i] for i in keep]
         print(f"Filtered remaining_tokens >= {args.min_remaining_tokens}: "
+              f"{before} -> {len(rl_records)}")
+
+    if args.min_remaining_value is not None:
+        before = len(rl_records)
+        keep = [i for i, r in enumerate(rl_records)
+                if r["extra_info"]["target_value"] >= args.min_remaining_value]
+        sft_records = [sft_records[i] for i in keep]
+        rl_records = [rl_records[i] for i in keep]
+        print(f"Filtered target_value >= {args.min_remaining_value}: "
               f"{before} -> {len(rl_records)}")
 
     if args.possible_only:
@@ -796,8 +930,21 @@ def main():
     sft_records_out = [{k: v for k, v in r.items() if k != "custom_id"}
                        for r in sft_records]
 
-    sft_ds = datasets.Dataset.from_list(sft_records_out)
-    rl_ds = datasets.Dataset.from_list(rl_records)
+    if args.emit in ("sft", "both") and not sft_records_out:
+        raise SystemExit(
+            "No SFT records left after filtering/balancing. Adjust the budget, "
+            "split, or filtering options."
+        )
+    if args.emit in ("rl", "both") and not rl_records:
+        raise SystemExit(
+            "No RL records left after filtering/balancing. Adjust --max-tokens, "
+            "--max-cost, --balance, or filtering options."
+        )
+
+    sft_ds = datasets.Dataset.from_list(sft_records_out) \
+        if args.emit in ("sft", "both") else None
+    rl_ds = datasets.Dataset.from_list(rl_records) \
+        if args.emit in ("rl", "both") else None
 
     os.makedirs(args.output_dir, exist_ok=True)
 

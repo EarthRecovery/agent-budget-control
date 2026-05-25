@@ -18,8 +18,9 @@ import statistics
 import sys
 
 ANSWER_PATTERN = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL)
-INTERVAL_PATTERN = re.compile(r"\[\s*(\d+)\s*,\s*(\d+)\s*\]")
-SCALAR_PATTERN = re.compile(r"^\s*(\d+)\s*$")
+NUMBER_PATTERN = r"-?\d+(?:\.\d+)?"
+INTERVAL_PATTERN = re.compile(rf"\[\s*({NUMBER_PATTERN})\s*,\s*({NUMBER_PATTERN})\s*\]")
+SCALAR_PATTERN = re.compile(rf"^\s*({NUMBER_PATTERN})\s*$")
 
 
 def parse_pred(response: str):
@@ -31,10 +32,10 @@ def parse_pred(response: str):
         return ("impossible",)
     iv = INTERVAL_PATTERN.search(text)
     if iv:
-        return ("interval", int(iv.group(1)), int(iv.group(2)))
+        return ("interval", float(iv.group(1)), float(iv.group(2)))
     sc = SCALAR_PATTERN.match(text)
     if sc:
-        return ("scalar", int(sc.group(1)))
+        return ("scalar", float(sc.group(1)))
     return None
 
 
@@ -99,7 +100,7 @@ def report(path: str):
         pred = parse_pred(r["response"])
         if not pred or pred[0] not in ("interval", "scalar"):
             continue
-        actual = int(r["remaining_tokens"])
+        actual = float(r.get("target_value", r["remaining_tokens"]))
         if actual <= 0:
             continue
         if pred[0] == "interval":

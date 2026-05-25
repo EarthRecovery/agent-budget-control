@@ -53,14 +53,21 @@ def classify(predicted, ground_truth):
     return pred_class, gt_class
 
 
-def covered(predicted, remaining_tokens):
+def covered(predicted, actual):
     """For interval predictions, did the interval cover the actual?"""
     if isinstance(predicted, tuple):
         lo, hi = predicted
-        return lo <= remaining_tokens <= hi
-    if isinstance(predicted, int):
-        return predicted == remaining_tokens
+        return lo <= actual <= hi
+    if isinstance(predicted, (int, float)):
+        return predicted == actual
     return False
+
+
+def as_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def main():
@@ -93,7 +100,15 @@ def main():
             "idx": i,
             "messages": ds[i]["prompt"],
             "ground_truth": ds[i]["reward_model"]["ground_truth"],
-            "remaining_tokens": int(ds[i]["extra_info"].get("remaining_tokens", 0)),
+            "remaining_tokens": int(as_float(ds[i]["extra_info"].get("remaining_tokens", 0))),
+            "remaining_cost": as_float(ds[i]["extra_info"].get("remaining_cost", 0.0)),
+            "target_value": as_float(
+                ds[i]["extra_info"].get(
+                    "target_value",
+                    ds[i]["extra_info"].get("remaining_tokens", 0),
+                )
+            ),
+            "target_unit": ds[i]["extra_info"].get("target_unit", "tokens"),
             "is_possible": bool(ds[i]["extra_info"].get("is_possible", False)),
             "custom_id": ds[i]["extra_info"].get("custom_id", str(i)),
         }
@@ -114,7 +129,12 @@ def main():
             response_text = fut.result()
             s = samples[idx]
             predicted = parse_answer(response_text)
-            extra_info = {"remaining_tokens": s["remaining_tokens"]}
+            extra_info = {
+                "remaining_tokens": s["remaining_tokens"],
+                "remaining_cost": s["remaining_cost"],
+                "target_value": s["target_value"],
+                "target_unit": s["target_unit"],
+            }
             reward = compute_score(
                 "budget_probe_sokoban",
                 response_text,
@@ -122,13 +142,16 @@ def main():
                 extra_info=extra_info,
             )
             pred_class, gt_class = classify(predicted, s["ground_truth"])
-            cov = covered(predicted, s["remaining_tokens"])
+            cov = covered(predicted, s["target_value"])
 
             results[idx] = {
                 "idx": idx,
                 "custom_id": s["custom_id"],
                 "ground_truth": s["ground_truth"],
                 "remaining_tokens": s["remaining_tokens"],
+                "remaining_cost": s["remaining_cost"],
+                "target_value": s["target_value"],
+                "target_unit": s["target_unit"],
                 "is_possible": s["is_possible"],
                 "response": response_text,
                 "predicted": str(predicted),
@@ -171,18 +194,20 @@ def main():
         pred = parse_answer(r["response"])
         if isinstance(pred, tuple):
             mid = (pred[0] + pred[1]) / 2.0
-        elif isinstance(pred, int):
+        elif isinstance(pred, (int, float)):
             mid = float(pred)
         else:
             continue
-        if r["remaining_tokens"] > 0:
-            mres.append(abs(mid - r["remaining_tokens"]) / r["remaining_tokens"])
+        actual = float(r.get("target_value", r["remaining_tokens"]))
+        if actual > 0:
+            mres.append(abs(mid - actual) / actual)
     mean_mre = sum(mres) / len(mres) if mres else 0.0
     median_mre = sorted(mres)[len(mres) // 2] if mres else 0.0
 
     summary = {
         "model_name": args.model_name,
         "test_parquet": args.test_parquet,
+        "target_unit": samples[0]["target_unit"] if samples else "tokens",
         "n_samples": n,
         "n_possible": len(possible),
         "n_impossible": len(impossible),

@@ -268,6 +268,12 @@ run_prepare() {
     "TOKENIZER=$TOKENIZER"
     "TASK_NAME=$(task_name_for_prepare)"
     "SFT_VARIANTS=$SFT_ABLATION"
+    "TARGET_UNIT=${TARGET_UNIT:-tokens}"
+    "MAX_COST=${MAX_COST:-}"
+    "COST_KEY=${COST_KEY:-env_reward_cost}"
+    "COST_DECIMALS=${COST_DECIMALS:-2}"
+    "MIN_REMAINING_TOKENS=${MIN_REMAINING_TOKENS:-1}"
+    "MIN_REMAINING_VALUE=${MIN_REMAINING_VALUE:-}"
     "BUDGET_PROBE_CONTEXT_WINDOW_MODE=${BUDGET_PROBE_CONTEXT_WINDOW_MODE:-full}"
     "BUDGET_PROBE_MAX_CONTEXT_WINDOW=${BUDGET_PROBE_MAX_CONTEXT_WINDOW:--1}"
     "BUDGET_PROBE_MAX_PROMPT_TOKENS=${BUDGET_PROBE_MAX_PROMPT_TOKENS:-}"
@@ -314,11 +320,13 @@ run_sft() {
 }
 
 run_rl() {
-  local sft_ckpt rl_name rl_dir rl_model
+  local sft_ckpt rl_name rl_dir rl_model rl_max_prompt rl_max_model
   sft_ckpt="${SFT_CKPT:-$EXP_BASE/checkpoints/$SFT_ABLATION/huggingface_e$SFT_TOTAL_EPOCHS}"
   rl_name="${RL_EXPERIMENT_NAME:-${EXP_NAME}_rl_${SFT_ABLATION}_e${SFT_TOTAL_EPOCHS}_kl$(printf '%s' "$RL_KL" | tr -d '.')}"
   rl_dir="${RL_SAVE_DIR:-$EXP_BASE/checkpoints/$rl_name}"
   rl_model="${RL_INIT_MODEL:-$sft_ckpt}"
+  rl_max_prompt="${RL_MAX_PROMPT_LENGTH:-8192}"
+  rl_max_model="${RL_MAX_MODEL_LEN:-$rl_max_prompt}"
 
   if [[ -z "${RL_INIT_MODEL:-}" && ! -f "$sft_ckpt/config.json" ]]; then
     if [[ "${DRY_RUN:-0}" = "1" ]]; then
@@ -343,6 +351,8 @@ run_rl() {
     "LR=${RL_LR:-5e-7}"
     "TOTAL_EPOCHS=${RL_TOTAL_EPOCHS:-5}"
     "ROLLOUT_N=${RL_ROLLOUT_N:-16}"
+    "RL_MAX_PROMPT_LENGTH=$rl_max_prompt"
+    "RL_MAX_RESPONSE_LENGTH=${RL_MAX_RESPONSE_LENGTH:-1024}"
     "PROJECT_NAME=${RL_PROJECT_NAME:-budget_probe_grpo}"
     "EXPERIMENT_NAME=$rl_name"
     "WANDB_RUN_GROUP=${WANDB_RUN_GROUP:-$EXP_NAME}"
@@ -355,7 +365,7 @@ run_rl() {
     "actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${RL_LOGPROB_MICRO_BS:-4}"
     "actor_rollout_ref.actor.kl_loss_coef=$RL_KL"
     "actor_rollout_ref.rollout.gpu_memory_utilization=${RL_GPU_UTIL:-0.4}"
-    "actor_rollout_ref.rollout.max_model_len=${RL_MAX_MODEL_LEN:-8192}"
+    "actor_rollout_ref.rollout.max_model_len=$rl_max_model"
     "trainer.default_local_dir=$rl_dir"
     "trainer.save_freq=${RL_SAVE_FREQ:-10}"
     'actor_rollout_ref.actor.checkpoint.save_contents=["model","extra"]'

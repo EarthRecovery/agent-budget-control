@@ -12,6 +12,9 @@ Output JSONL: one line per dialogue:
   {
     "custom_id": "traj_<idx>",
     "messages": [user, assistant, user, assistant, ...],
+    "per_turn_costs": [
+      {"env_reward_cost": max(0, -reward), "financial_cost": ...}
+    ],
     "metadata": {
       "env_id", "group_id", "num_turns", "success",
       "CoordSokoban/success": 1.0 or 0.0  (used by prepare_budget_probe.py)
@@ -46,12 +49,36 @@ def _rollout_success(item, turns):
     return any(bool(t.get("success")) for t in turns)
 
 
+def _num(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _financial_cost(financials):
+    if not isinstance(financials, dict):
+        return None
+    keys = (
+        "production_cost",
+        "intl_shipping_cost",
+        "domestic_shipping_cost",
+        "holding_cost",
+        "fixed_opex",
+        "credit_interest",
+        "stockout_penalty",
+        "overstock_penalty",
+    )
+    return sum(_num(financials.get(key)) for key in keys)
+
+
 def convert(item, custom_id, max_turns=None):
     turns = item.get("turns", [])
     if max_turns is not None:
         turns = turns[:max_turns]
     messages = []
     per_turn_api_tokens = []
+    per_turn_costs = []
     for t in turns:
         user_content = _first_present(t, ("user_prompt", "prompt", "observation"), "")
         asst_content = _first_present(
@@ -69,6 +96,15 @@ def convert(item, custom_id, max_turns=None):
             "input": t.get("api_input_tokens"),
             "output": t.get("api_output_tokens"),
         })
+        reward = t.get("reward")
+        env_reward_cost = None
+        if isinstance(reward, (int, float)):
+            env_reward_cost = max(0.0, -float(reward))
+        per_turn_costs.append({
+            "env_reward_cost": env_reward_cost,
+            "financial_cost": _financial_cost(t.get("financials")),
+            "reward": reward,
+        })
 
     tag = item.get("tag") or item.get("env_tag") or "unknown"
     any_success = _rollout_success(item, turns)
@@ -77,6 +113,7 @@ def convert(item, custom_id, max_turns=None):
         "custom_id": custom_id,
         "messages": messages,
         "per_turn_api_tokens": per_turn_api_tokens,
+        "per_turn_costs": per_turn_costs,
         "metadata": {
             "env_id": item.get("env_id"),
             "group_id": item.get("group_id"),

@@ -26,6 +26,12 @@ TOKENIZER="${TOKENIZER:-Qwen/Qwen2.5-7B-Instruct}"
 TASK_NAME="${TASK_NAME:-sokoban}"
 SYSTEM_PROMPT_FILE="${SYSTEM_PROMPT_FILE:-}"
 SFT_VARIANTS="${SFT_VARIANTS:-all}"
+TARGET_UNIT="${TARGET_UNIT:-tokens}"
+MAX_COST="${MAX_COST:-}"
+COST_KEY="${COST_KEY:-env_reward_cost}"
+COST_DECIMALS="${COST_DECIMALS:-2}"
+MIN_REMAINING_TOKENS="${MIN_REMAINING_TOKENS:-1}"
+MIN_REMAINING_VALUE="${MIN_REMAINING_VALUE:-}"
 BUDGET_PROBE_CONTEXT_WINDOW_MODE="${BUDGET_PROBE_CONTEXT_WINDOW_MODE:-full}"
 BUDGET_PROBE_MAX_CONTEXT_WINDOW="${BUDGET_PROBE_MAX_CONTEXT_WINDOW:--1}"
 BUDGET_PROBE_MAX_PROMPT_TOKENS="${BUDGET_PROBE_MAX_PROMPT_TOKENS:-}"
@@ -101,11 +107,20 @@ COMMON_FLAGS=(
   --tokenizer "${TOKENIZER}"
   --task-name "${TASK_NAME}"
   --seed "${SEED}"
-  --min-remaining-tokens 1
+  --min-remaining-tokens "${MIN_REMAINING_TOKENS}"
+  --target-unit "${TARGET_UNIT}"
+  --cost-key "${COST_KEY}"
+  --cost-decimals "${COST_DECIMALS}"
   --context-window-mode "${BUDGET_PROBE_CONTEXT_WINDOW_MODE}"
   --max-context-window "${BUDGET_PROBE_MAX_CONTEXT_WINDOW}"
 )
 
+if [ -n "${MAX_COST}" ]; then
+  COMMON_FLAGS+=(--max-cost "${MAX_COST}")
+fi
+if [ -n "${MIN_REMAINING_VALUE}" ]; then
+  COMMON_FLAGS+=(--min-remaining-value "${MIN_REMAINING_VALUE}")
+fi
 if [ -n "${SYSTEM_PROMPT_FILE}" ]; then
   COMMON_FLAGS+=(--system-prompt-file "${SYSTEM_PROMPT_FILE}")
 fi
@@ -120,6 +135,12 @@ echo "Context window mode: ${BUDGET_PROBE_CONTEXT_WINDOW_MODE}"
 echo "Max context window: ${BUDGET_PROBE_MAX_CONTEXT_WINDOW}"
 echo "Max prompt tokens: ${BUDGET_PROBE_MAX_PROMPT_TOKENS:-disabled}"
 echo "Drop overlong prompts: ${BUDGET_PROBE_DROP_OVERLONG_PROMPTS}"
+echo "Target unit: ${TARGET_UNIT}"
+echo "Max tokens: ${MAX_TOKENS}"
+echo "Max cost: ${MAX_COST:-uses max tokens fallback}"
+echo "Cost key: ${COST_KEY}"
+echo "Min remaining tokens: ${MIN_REMAINING_TOKENS}"
+echo "Min remaining value: ${MIN_REMAINING_VALUE:-disabled}"
 
 echo
 echo "=== Step 2: RL training data (interval, percent ±10%, balanced) ==="

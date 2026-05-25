@@ -21,8 +21,9 @@ import re
 import threading
 
 ANSWER_PATTERN = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL)
-INTERVAL_PATTERN = re.compile(r"\[\s*(\d+)\s*,\s*(\d+)\s*\]")
-SCALAR_PATTERN = re.compile(r"^\s*(\d+)\s*$")
+NUMBER_PATTERN = r"-?\d+(?:\.\d+)?"
+INTERVAL_PATTERN = re.compile(rf"\[\s*({NUMBER_PATTERN})\s*,\s*({NUMBER_PATTERN})\s*\]")
+SCALAR_PATTERN = re.compile(rf"^\s*({NUMBER_PATTERN})\s*$")
 
 POSSIBLE_WEIGHT = 1.8
 IMPOSSIBLE_WEIGHT = 0.2
@@ -114,17 +115,30 @@ def parse_answer(solution_str):
         return "impossible"
     interval_match = INTERVAL_PATTERN.search(answer_text)
     if interval_match:
-        return int(interval_match.group(1)), int(interval_match.group(2))
+        return float(interval_match.group(1)), float(interval_match.group(2))
     scalar_match = SCALAR_PATTERN.match(answer_text)
     if scalar_match:
-        return int(scalar_match.group(1))
+        return float(scalar_match.group(1))
     return None
+
+
+def _target_value(extra_info):
+    if not extra_info:
+        return 0.0
+    for key in ("target_value", "remaining_cost", "remaining_tokens"):
+        value = extra_info.get(key)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return 0.0
 
 
 def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
     predicted = parse_answer(solution_str)
     gt_is_impossible = ground_truth == "impossible"
-    remaining_tokens = extra_info.get("remaining_tokens", 0) if extra_info else 0
+    actual = _target_value(extra_info)
 
     # Build per-sample info for metrics
     sample_info = {
@@ -165,13 +179,13 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
 
         sample_info["width"] = est_high - est_low
         mid = (est_low + est_high) / 2.0
-        if remaining_tokens > 0:
-            sample_info["rel_error"] = abs(mid - remaining_tokens) / remaining_tokens
+        if actual > 0:
+            sample_info["rel_error"] = abs(mid - actual) / actual
 
-        if remaining_tokens == 0:
+        if actual == 0:
             accuracy = 1.0 if (est_low == 0 and est_high == 0) else 0.0
-        elif est_low <= remaining_tokens <= est_high:
-            accuracy = max(0.0, 1.0 - (est_high - est_low) / remaining_tokens)
+        elif est_low <= actual <= est_high:
+            accuracy = max(0.0, 1.0 - (est_high - est_low) / actual)
             sample_info["covered"] = True
         else:
             accuracy = 0.0
